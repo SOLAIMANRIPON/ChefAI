@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "ChefAI",
+    "slug": "chef-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "package": "com.solaiman.chefai"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9c603898-4854-40bc-96bc-a2341cf8dd72"
+      }
+    }
+  }
+}
