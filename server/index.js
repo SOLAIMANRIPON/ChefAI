@@ -8,6 +8,8 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3.1-flash-lite-preview').trim();
+const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image').trim();
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
@@ -27,7 +29,7 @@ const buildDishImageUrl = (seedText) => {
 async function generateText(prompt, timeoutMs = 30000) {
   if (!GEMINI_API_KEY) return null;
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: GEMINI_TEXT_MODEL });
   const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -46,6 +48,14 @@ async function generateText(prompt, timeoutMs = 30000) {
         message.includes('503') ||
         message.toLowerCase().includes('service unavailable') ||
         message.toLowerCase().includes('high demand');
+      const isTimeout =
+        message.toLowerCase().includes('timeout') ||
+        message.toLowerCase().includes('timed out');
+      const isQuotaOrBillingIssue =
+        message.includes('429') ||
+        message.toLowerCase().includes('quota') ||
+        message.toLowerCase().includes('billing') ||
+        message.toLowerCase().includes('prepayment credits are depleted');
 
       if (isTemporaryOverload && attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
@@ -54,6 +64,10 @@ async function generateText(prompt, timeoutMs = 30000) {
 
       // For temporary provider-side overload, fail gracefully to fallback recipes.
       if (isTemporaryOverload) return null;
+      // For timeout, return null so endpoints can use fallback payload.
+      if (isTimeout) return null;
+      // For exhausted credits/quota, return null so endpoints can use fallback response.
+      if (isQuotaOrBillingIssue) return null;
       throw error;
     }
   }
@@ -64,7 +78,9 @@ async function generateText(prompt, timeoutMs = 30000) {
 async function generateImageFromGemini(imagePrompt, timeoutMs = 45000) {
   if (!GEMINI_API_KEY) return null;
   const finalPrompt = `${imagePrompt}, ultra realistic food photography, natural light, close-up plated dish, no text, no watermark`;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${encodeURIComponent(
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    GEMINI_IMAGE_MODEL
+  )}:generateContent?key=${encodeURIComponent(
     GEMINI_API_KEY
   )}`;
 
@@ -138,6 +154,8 @@ app.get('/api/v1/health', (_req, res) => {
     ok: true,
     service: 'ChefAI backend',
     geminiConfigured: Boolean(GEMINI_API_KEY),
+    textModel: GEMINI_TEXT_MODEL,
+    imageModel: GEMINI_IMAGE_MODEL,
     timestamp: new Date().toISOString(),
   });
 });

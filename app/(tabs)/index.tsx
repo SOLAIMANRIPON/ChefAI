@@ -22,8 +22,32 @@ const DAILY_FREE_LIMIT = 5;
 const DAILY_USAGE_STORAGE_KEY = 'chefai_daily_usage_v1';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
-const languages = ['বাংলা', 'English', 'Hindi', 'Arabic', 'French', 'Spanish', 'Urdu'];
-const cuisines = ['Bangladeshi', 'Indian', 'Italian', 'Chinese', 'Mexican', 'Thai', 'Turkish', 'Japanese'];
+const popularFoodCountries = [
+  'Bangladesh',
+  'India',
+  'Pakistan',
+  'China',
+  'Japan',
+  'Thailand',
+  'Korea',
+  'Turkey',
+  'Iran',
+  'Saudi Arabia',
+  'United Arab Emirates',
+  'Italy',
+  'France',
+  'Spain',
+  'Greece',
+  'Mexico',
+  'United States',
+  'Brazil',
+  'Argentina',
+  'United Kingdom',
+];
+
+const coreLanguages = ['বাংলা', 'English', 'Hindi', 'Arabic', 'French', 'Spanish', 'Urdu'];
+const languages = [...coreLanguages, ...popularFoodCountries];
+const cuisines = ['Bangladeshi', 'Indian', 'Italian', 'Chinese', 'Mexican', 'Thai', 'Turkish', 'Japanese', ...popularFoodCountries];
 const uiTranslations: Record<
   string,
   {
@@ -67,6 +91,64 @@ const uiTranslations: Record<
     ingredientPlaceholder: 'اجزاء کا نام یا کھانے کا نام لکھیں...',
     freeLimitEnded: 'آج کی 5 فری درخواستیں ختم ہو چکی ہیں۔ مزید کے لیے کریڈٹ خریدیں یا سبسکرائب کریں۔',
   },
+  Japanese: {
+    freeRemainingLabel: '本日の無料残り',
+    ingredientPlaceholder: '材料名または料理名を入力してください...',
+    freeLimitEnded: '本日の無料5回分は終了しました。続行するにはクレジット購入または登録してください。',
+  },
+  Chinese: {
+    freeRemainingLabel: '今日剩余免费次数',
+    ingredientPlaceholder: '请输入食材名称或菜名...',
+    freeLimitEnded: '今天的5次免费请求已用完。请购买额度或订阅继续使用。',
+  },
+  Korean: {
+    freeRemainingLabel: '오늘 남은 무료 횟수',
+    ingredientPlaceholder: '재료 이름 또는 음식 이름을 입력하세요...',
+    freeLimitEnded: '오늘의 무료 5회 요청을 모두 사용했습니다. 계속하려면 크레딧 구매 또는 구독이 필요합니다.',
+  },
+  Turkish: {
+    freeRemainingLabel: 'Bugun kalan ucretsiz hak',
+    ingredientPlaceholder: 'Malzeme veya yemek adini yazin...',
+    freeLimitEnded: 'Bugunku 5 ucretsiz istek doldu. Devam etmek icin kredi satin alin veya abone olun.',
+  },
+  Persian: {
+    freeRemainingLabel: 'باقی مانده رایگان امروز',
+    ingredientPlaceholder: 'نام ماده يا نام غذا را وارد کنيد...',
+    freeLimitEnded: '۵ درخواست رايگان امروز تمام شده است. براي ادامه اعتبار خريداري کنيد يا اشتراک بگيريد.',
+  },
+  Portuguese: {
+    freeRemainingLabel: 'Gratis restante hoje',
+    ingredientPlaceholder: 'Digite o nome do ingrediente ou do prato...',
+    freeLimitEnded: 'As 5 solicitacoes gratis de hoje acabaram. Compre creditos ou assine para continuar.',
+  },
+  Greek: {
+    freeRemainingLabel: 'Δωρεαν υπολοιπο σημερα',
+    ingredientPlaceholder: 'Γραψτε ονομα υλικου ή φαγητου...',
+    freeLimitEnded: 'Οι 5 δωρεαν αιτησεις της ημερας τελειωσαν. Αγοραστε πιστωσεις ή κανετε συνδρομη.',
+  },
+};
+
+const languageAliasByCountry: Record<string, keyof typeof uiTranslations> = {
+  Bangladesh: 'বাংলা',
+  India: 'Hindi',
+  Pakistan: 'Urdu',
+  China: 'Chinese',
+  Japan: 'Japanese',
+  Thailand: 'English',
+  Korea: 'Korean',
+  Turkey: 'Turkish',
+  Iran: 'Persian',
+  'Saudi Arabia': 'Arabic',
+  'United Arab Emirates': 'Arabic',
+  Italy: 'English',
+  France: 'French',
+  Spain: 'Spanish',
+  Greece: 'Greek',
+  Mexico: 'Spanish',
+  'United States': 'English',
+  Brazil: 'Portuguese',
+  Argentina: 'Spanish',
+  'United Kingdom': 'English',
 };
 
 export default function ChefAI() {
@@ -83,7 +165,8 @@ export default function ChefAI() {
   const [langModal, setLangModal] = useState(false);
   const [cuisineModal, setCuisineModal] = useState(false);
   const [freeUsedToday, setFreeUsedToday] = useState(0);
-  const uiText = uiTranslations[selectedLang] ?? uiTranslations['বাংলা'];
+  const resolvedLanguage = languageAliasByCountry[selectedLang] ?? selectedLang;
+  const uiText = uiTranslations[resolvedLanguage] ?? uiTranslations['English'];
 
   const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
 
@@ -255,6 +338,34 @@ export default function ChefAI() {
     </Modal>
   );
 
+  const LanguageSelectionModal = ({ visible, onSelect, onClose }: any) => (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Select Language</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={styles.modalSectionTitle}>Languages</Text>
+            {coreLanguages.map((item) => (
+              <TouchableOpacity key={`lang-${item}`} style={styles.modalItem} onPress={() => { onSelect(item); onClose(); }}>
+                <Text style={styles.modalItemText}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <Text style={styles.modalSectionTitle}>Countries</Text>
+            {popularFoodCountries.map((item) => (
+              <TouchableOpacity key={`country-${item}`} style={styles.modalItem} onPress={() => { onSelect(item); onClose(); }}>
+                <Text style={styles.modalItemText}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+            <Text style={styles.closeBtnText}>CLOSE</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -323,7 +434,7 @@ export default function ChefAI() {
         <Text style={styles.footerText}>DESIGNED BY SOLAIMAN • 2026</Text>
       </ScrollView>
 
-      <SelectionModal visible={langModal} data={languages} onSelect={setSelectedLang} onClose={() => setLangModal(false)} title="Select Language" />
+      <LanguageSelectionModal visible={langModal} onSelect={setSelectedLang} onClose={() => setLangModal(false)} />
       <SelectionModal visible={cuisineModal} data={cuisines} onSelect={setSelectedCuisine} onClose={() => setCuisineModal(false)} title="Select Cuisine" />
     </SafeAreaView>
   );
@@ -363,6 +474,7 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { backgroundColor: '#111', width: '85%', borderRadius: 25, padding: 20, borderWidth: 1, borderColor: '#d3b275', maxHeight: '75%' },
   modalTitle: { color: '#d3b275', fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  modalSectionTitle: { color: '#8f8f8f', fontSize: 12, textTransform: 'uppercase', marginTop: 6, marginBottom: 4, letterSpacing: 1.2 },
   modalItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#222' },
   modalItemText: { color: '#fff', fontSize: 18, textAlign: 'center' },
   closeBtn: { marginTop: 20, padding: 10, backgroundColor: '#222', borderRadius: 10 },
