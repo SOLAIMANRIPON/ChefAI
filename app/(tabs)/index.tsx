@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,6 +20,7 @@ import {
 const { width } = Dimensions.get('window');
 const DAILY_FREE_LIMIT = 5;
 const DAILY_USAGE_STORAGE_KEY = 'chefai_daily_usage_v1';
+const RECENT_SEARCHES_STORAGE_KEY = 'chefai_recent_searches_v1';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
 const popularFoodCountries = [
@@ -46,7 +47,6 @@ const popularFoodCountries = [
 ];
 
 const coreLanguages = ['বাংলা', 'English', 'Hindi', 'Arabic', 'French', 'Spanish', 'Urdu'];
-const languages = [...coreLanguages, ...popularFoodCountries];
 const cuisines = ['Bangladeshi', 'Indian', 'Italian', 'Chinese', 'Mexican', 'Thai', 'Turkish', 'Japanese', ...popularFoodCountries];
 const uiTranslations: Record<
   string,
@@ -152,10 +152,9 @@ const languageAliasByCountry: Record<string, keyof typeof uiTranslations> = {
 };
 
 export default function ChefAI() {
+  const params = useLocalSearchParams<{ ingredient?: string }>();
   const router = useRouter();
   const [ingredient, setIngredient] = useState('');
-  const [popularRecipes, setPopularRecipes] = useState<string[]>([]);
-  const [selectedRecipeLoading, setSelectedRecipeLoading] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   
@@ -224,6 +223,12 @@ export default function ChefAI() {
     loadDailyUsage();
   }, []);
 
+  React.useEffect(() => {
+    if (typeof params.ingredient === 'string' && params.ingredient.trim()) {
+      setIngredient(params.ingredient);
+    }
+  }, [params.ingredient]);
+
   const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs = 25000) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -274,18 +279,21 @@ export default function ChefAI() {
     return recipes.slice(0, 10);
   };
 
-  const handleRecipeSelect = (selectedRecipeName: string) => {
-    setSelectedRecipeLoading(selectedRecipeName);
-    router.push({
-      pathname: '/recipe-details',
-      params: {
-        recipeName: selectedRecipeName,
-        ingredient,
-        selectedCuisine,
-        selectedLang,
-      },
-    });
-    setTimeout(() => setSelectedRecipeLoading(null), 600);
+  const saveRecentSearch = async (query: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(RECENT_SEARCHES_STORAGE_KEY);
+      const previous = raw ? (JSON.parse(raw) as Array<{ query: string; cuisine: string; language: string; at: string }>) : [];
+      const nextItem = {
+        query,
+        cuisine: selectedCuisine,
+        language: selectedLang,
+        at: new Date().toISOString(),
+      };
+      const uniqueItems = [nextItem, ...previous.filter((item) => item.query !== query)];
+      await AsyncStorage.setItem(RECENT_SEARCHES_STORAGE_KEY, JSON.stringify(uniqueItems.slice(0, 20)));
+    } catch {
+      // Keep flow uninterrupted when history storage fails.
+    }
   };
 
   const handleStartCooking = async () => {
@@ -296,10 +304,18 @@ export default function ChefAI() {
     }
     setLoading(true);
     setErrorMessage('');
-    setPopularRecipes([]);
     try {
       const recipeNames = await fetchRecipeNamesFromBackend();
-      setPopularRecipes(recipeNames);
+      await saveRecentSearch(ingredient.trim());
+      router.push({
+        pathname: '/recipe-list',
+        params: {
+          recipes: JSON.stringify(recipeNames),
+          ingredient,
+          selectedCuisine,
+          selectedLang,
+        },
+      });
       await consumeFreeUsage();
     } catch (error: any) {
       console.error(error);
@@ -310,7 +326,6 @@ export default function ChefAI() {
       } else {
         setErrorMessage('রেসিপি লোড করা যায়নি। দয়া করে আবার চেষ্টা করুন।');
       }
-      setPopularRecipes([]);
     } finally {
       setLoading(false);
     }
@@ -321,10 +336,10 @@ export default function ChefAI() {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <Text style={styles.modalTitle}>{title}</Text>
-          <FlatList
+          <FlatList<string>
             data={data}
             keyExtractor={(item) => item}
-            renderItem={({ item }) => (
+            renderItem={({ item }: { item: string }) => (
               <TouchableOpacity style={styles.modalItem} onPress={() => { onSelect(item); onClose(); }}>
                 <Text style={styles.modalItemText}>{item}</Text>
               </TouchableOpacity>
@@ -408,27 +423,6 @@ export default function ChefAI() {
           ) : null}
         </View>
 
-        {popularRecipes.length > 0 ? (
-          <View style={styles.recipeListCard}>
-            <Text style={styles.listTitle}>জনপ্রিয় ১০টি রেসিপি</Text>
-            {popularRecipes.map((item) => (
-              <TouchableOpacity
-                key={item}
-                style={styles.recipeListItem}
-                onPress={() => handleRecipeSelect(item)}
-                disabled={selectedRecipeLoading === item}>
-                {selectedRecipeLoading === item ? (
-                  <View style={styles.recipeItemLoading}>
-                    <ActivityIndicator size="small" color="#d3b275" />
-                    <Text style={styles.recipeListItemText}>লোড হচ্ছে...</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.recipeListItemText}>{item}</Text>
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        ) : null}
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
         <Text style={styles.footerText}>DESIGNED BY SOLAIMAN • 2026</Text>
@@ -464,11 +458,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   devResetBtnText: { color: '#bdbdbd', fontSize: 12, fontWeight: '600' },
-  recipeListCard: { width: '100%', backgroundColor: '#111', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#222', marginBottom: 20 },
-  listTitle: { color: '#d3b275', fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
-  recipeListItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#222' },
-  recipeListItemText: { color: '#fff', fontSize: 16 },
-  recipeItemLoading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   errorText: { color: '#ff7f7f', fontSize: 14, marginTop: 6, marginBottom: 8, textAlign: 'center' },
   footerText: { color: '#444', fontSize: 10, letterSpacing: 4, marginTop: 20, marginBottom: 40 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },

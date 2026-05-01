@@ -1,0 +1,102 @@
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+export default function RecipeListScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{
+    recipes?: string;
+    ingredient?: string;
+    selectedCuisine?: string;
+    selectedLang?: string;
+  }>();
+
+  const ingredient = params.ingredient ?? '';
+  const selectedCuisine = params.selectedCuisine ?? 'Bangladeshi';
+  const selectedLang = params.selectedLang ?? 'বাংলা';
+  const [selectedRecipeLoading, setSelectedRecipeLoading] = useState<string | null>(null);
+
+  const recipes = useMemo(() => {
+    try {
+      const parsed = JSON.parse(params.recipes ?? '[]');
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      return [];
+    }
+  }, [params.recipes]);
+
+  const handleRecipeSelect = (selectedRecipeName: string) => {
+    setSelectedRecipeLoading(selectedRecipeName);
+    router.push({
+      pathname: '/recipe-details',
+      params: {
+        recipeName: selectedRecipeName,
+        ingredient,
+        selectedCuisine,
+        selectedLang,
+      },
+    });
+    setTimeout(() => setSelectedRecipeLoading(null), 600);
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.summaryText}>
+          Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}
+        </Text>
+
+        <View style={styles.recipeListCard}>
+          <Text style={styles.listTitle}>Top Recipe Suggestions</Text>
+          {recipes.length === 0 ? (
+            <Text style={styles.emptyText}>No recipes found. Please go back and try again.</Text>
+          ) : (
+            recipes.map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={styles.recipeListItem}
+                onPress={() => handleRecipeSelect(item)}
+                disabled={selectedRecipeLoading === item}>
+                {selectedRecipeLoading === item ? (
+                  <View style={styles.recipeItemLoading}>
+                    <ActivityIndicator size="small" color="#d3b275" />
+                    <Text style={styles.recipeListItemText}>Loading...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.recipeListItemText}>{item}</Text>
+                )}
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#000' },
+  scrollContent: { padding: 20, alignItems: 'center' },
+  backButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#d3b275',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 16,
+  },
+  backButtonText: { color: '#d3b275', fontSize: 14, fontWeight: '600' },
+  summaryText: { alignSelf: 'flex-start', color: '#9a9a9a', fontSize: 12, marginBottom: 16 },
+  recipeListCard: { width: '100%', backgroundColor: '#111', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#222' },
+  listTitle: { color: '#d3b275', fontSize: 20, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  recipeListItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#222' },
+  recipeListItemText: { color: '#fff', fontSize: 16 },
+  recipeItemLoading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  emptyText: { color: '#bbb', fontSize: 14, textAlign: 'center', paddingVertical: 14 },
+});

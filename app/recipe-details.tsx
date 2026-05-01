@@ -1,7 +1,9 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   SafeAreaView,
   ScrollView,
@@ -12,6 +14,8 @@ import {
 } from 'react-native';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+const SAVED_RECIPES_STORAGE_KEY = 'chefai_saved_recipes_v1';
+const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
 // Locked timeout/retry policy for production stability.
 const recipeDetailsCache: Record<string, { dishName: string; recipe: string; imageUrl: string }> = {};
 
@@ -56,6 +60,52 @@ export default function RecipeDetailsScreen() {
   const [imageFallbackTried, setImageFallbackTried] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const saveRecentView = async (name: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(RECENT_VIEWS_STORAGE_KEY);
+      const previous = raw ? JSON.parse(raw) : [];
+      const nextItem = {
+        id: `${name}-${Date.now()}`,
+        recipeName: name,
+        ingredient,
+        cuisine: selectedCuisine,
+        language: selectedLang,
+        at: new Date().toISOString(),
+      };
+      const deduped = [nextItem, ...previous.filter((item: any) => item?.recipeName !== name)];
+      await AsyncStorage.setItem(RECENT_VIEWS_STORAGE_KEY, JSON.stringify(deduped.slice(0, 30)));
+    } catch {
+      // Ignore history persistence failures.
+    }
+  };
+
+  const saveRecipe = async () => {
+    if (!recipe.trim()) return;
+    setSaving(true);
+    try {
+      const raw = await AsyncStorage.getItem(SAVED_RECIPES_STORAGE_KEY);
+      const previous = raw ? JSON.parse(raw) : [];
+      const nextItem = {
+        id: `${dishName}-${Date.now()}`,
+        dishName,
+        recipe,
+        imageUrl,
+        ingredient,
+        cuisine: selectedCuisine,
+        language: selectedLang,
+        savedAt: new Date().toISOString(),
+      };
+      const deduped = [nextItem, ...previous.filter((item: any) => item?.dishName !== dishName)];
+      await AsyncStorage.setItem(SAVED_RECIPES_STORAGE_KEY, JSON.stringify(deduped.slice(0, 50)));
+      Alert.alert('Saved', 'Recipe saved to Explore tab.');
+    } catch {
+      Alert.alert('Failed', 'Could not save recipe right now.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const fetchRecipeDetailsFromBackend = async () => {
     if (!API_BASE_URL) {
@@ -123,6 +173,7 @@ export default function RecipeDetailsScreen() {
         setDishName(name);
         setRecipe(instructions);
         setImageUrl(generatedImageUrl);
+        await saveRecentView(name);
         recipeDetailsCache[cacheKey] = {
           dishName: name,
           recipe: instructions,
@@ -152,6 +203,9 @@ export default function RecipeDetailsScreen() {
         <Text style={styles.summaryText}>
           Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}
         </Text>
+        <TouchableOpacity style={styles.saveButton} onPress={saveRecipe} disabled={saving || loading || !recipe}>
+          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
+        </TouchableOpacity>
 
         {loading ? (
           <View style={styles.loaderWrap}>
@@ -210,6 +264,17 @@ const styles = StyleSheet.create({
   },
   backButtonText: { color: '#d3b275', fontSize: 14, fontWeight: '600' },
   summaryText: { alignSelf: 'flex-start', color: '#9a9a9a', fontSize: 12, marginBottom: 14 },
+  saveButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#444',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 14,
+  },
+  saveButtonText: { color: '#d3b275', fontSize: 13, fontWeight: '600' },
   loaderWrap: { alignItems: 'center', marginTop: 80 },
   loaderText: { color: '#d3b275', marginTop: 10, fontSize: 14 },
   dishImage: {
