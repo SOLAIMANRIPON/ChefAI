@@ -21,6 +21,9 @@ expo-env.d.ts
 # Metro
 .metro-health-check*
 
+# JetBrains / Android Studio
+.idea/
+
 # debug
 npm-debug.*
 yarn-debug.*

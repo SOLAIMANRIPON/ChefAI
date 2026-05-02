@@ -1,7 +1,10 @@
+import {
+  normalizeDietPreference,
+  normalizeSpiceLevel,
+} from '@/constants/recipe-preferences';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-
 export default function RecipeListScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -9,11 +12,20 @@ export default function RecipeListScreen() {
     ingredient?: string;
     selectedCuisine?: string;
     selectedLang?: string;
+    generationMode?: string;
+    dietPreference?: string;
+    spiceLevel?: string;
+    maxCaloriesPerMeal?: string;
   }>();
 
   const ingredient = params.ingredient ?? '';
   const selectedCuisine = params.selectedCuisine ?? 'Bangladeshi';
   const selectedLang = params.selectedLang ?? 'বাংলা';
+  const generationMode =
+    params.generationMode === 'creative' || params.generationMode === 'strict' ? params.generationMode : 'strict';
+  const dietPreference = normalizeDietPreference(params.dietPreference);
+  const spiceLevel = normalizeSpiceLevel(params.spiceLevel);
+  const maxCaloriesPerMeal = params.maxCaloriesPerMeal?.trim() ?? '';
   const [selectedRecipeLoading, setSelectedRecipeLoading] = useState<string | null>(null);
 
   const recipes = useMemo(() => {
@@ -29,11 +41,15 @@ export default function RecipeListScreen() {
     setSelectedRecipeLoading(selectedRecipeName);
     router.push({
       pathname: '/recipe-details',
-      params: {
+        params: {
         recipeName: selectedRecipeName,
         ingredient,
         selectedCuisine,
         selectedLang,
+        generationMode,
+        dietPreference,
+        spiceLevel,
+        maxCaloriesPerMeal,
       },
     });
     setTimeout(() => setSelectedRecipeLoading(null), 600);
@@ -46,7 +62,11 @@ export default function RecipeListScreen() {
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.summaryText}>
-          Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}
+          Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}  |  Mode:{' '}
+          {generationMode}
+          {'  |  '}
+          Diet: {dietPreference}  |  Spice: {spiceLevel}
+          {maxCaloriesPerMeal ? `  |  Max kcal: ${maxCaloriesPerMeal}` : ''}
         </Text>
 
         <View style={styles.recipeListCard}>

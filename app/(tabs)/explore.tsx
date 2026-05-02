@@ -1,3 +1,9 @@
+import {
+  type DietPreference,
+  type SpiceLevel,
+  normalizeDietPreference,
+  normalizeSpiceLevel,
+} from '@/constants/recipe-preferences';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -14,6 +20,10 @@ type SavedRecipe = {
   ingredient?: string;
   cuisine?: string;
   language?: string;
+  generationMode?: 'strict' | 'creative';
+  dietPreference?: DietPreference;
+  spiceLevel?: SpiceLevel;
+  maxCaloriesPerMeal?: string;
 };
 
 type RecentView = {
@@ -73,7 +83,16 @@ export default function ExploreScreen() {
       .map(([name]) => name);
   }, [recentViews]);
 
-  const openRecipe = (recipeName: string, ingredient = '', cuisine = 'Bangladeshi', language = 'বাংলা') => {
+  const openRecipe = (
+    recipeName: string,
+    ingredient = '',
+    cuisine = 'Bangladeshi',
+    language = 'বাংলা',
+    generationMode: 'strict' | 'creative' = 'strict',
+    dietPreference: DietPreference = 'none',
+    spiceLevel: SpiceLevel = 'medium',
+    maxCaloriesPerMeal = ''
+  ) => {
     router.push({
       pathname: '/recipe-details',
       params: {
@@ -81,6 +100,10 @@ export default function ExploreScreen() {
         ingredient,
         selectedCuisine: cuisine,
         selectedLang: language,
+        generationMode,
+        dietPreference,
+        spiceLevel,
+        maxCaloriesPerMeal,
       },
     });
   };
@@ -99,7 +122,17 @@ export default function ExploreScreen() {
             <TouchableOpacity
               key={item.id}
               style={styles.item}
-              onPress={() => openRecipe(item.dishName, item.ingredient, item.cuisine, item.language)}>
+              onPress={() =>
+                openRecipe(
+                  item.dishName,
+                  item.ingredient,
+                  item.cuisine,
+                  item.language,
+                  item.generationMode === 'creative' ? 'creative' : 'strict',
+                  normalizeDietPreference(item.dietPreference),
+                  normalizeSpiceLevel(item.spiceLevel),
+                  item.maxCaloriesPerMeal ?? ''
+                )}>
               <Text style={styles.itemTitle}>{item.dishName}</Text>
               <Text style={styles.itemMeta}>
                 {item.cuisine || 'Cuisine'} | {item.language || 'Language'}

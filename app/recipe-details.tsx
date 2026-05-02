@@ -1,3 +1,8 @@
+import {
+  normalizeDietPreference,
+  normalizeSpiceLevel,
+  parseMaxCaloriesParam,
+} from '@/constants/recipe-preferences';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -46,12 +51,21 @@ export default function RecipeDetailsScreen() {
     ingredient?: string;
     selectedCuisine?: string;
     selectedLang?: string;
+    generationMode?: string;
+    dietPreference?: string;
+    spiceLevel?: string;
+    maxCaloriesPerMeal?: string;
   }>();
 
   const recipeName = params.recipeName ?? 'Recipe';
   const ingredient = params.ingredient ?? '';
   const selectedCuisine = params.selectedCuisine ?? 'Bangladeshi';
   const selectedLang = params.selectedLang ?? 'বাংলা';
+  const generationMode =
+    params.generationMode === 'creative' || params.generationMode === 'strict' ? params.generationMode : 'strict';
+  const dietPreference = normalizeDietPreference(params.dietPreference);
+  const spiceLevel = normalizeSpiceLevel(params.spiceLevel);
+  const maxCaloriesPerMeal = parseMaxCaloriesParam(params.maxCaloriesPerMeal);
 
   const [dishName, setDishName] = useState(recipeName);
   const [recipe, setRecipe] = useState('');
@@ -95,6 +109,10 @@ export default function RecipeDetailsScreen() {
         ingredient,
         cuisine: selectedCuisine,
         language: selectedLang,
+        generationMode,
+        dietPreference,
+        spiceLevel,
+        maxCaloriesPerMeal: maxCaloriesPerMeal != null ? String(maxCaloriesPerMeal) : '',
         savedAt: new Date().toISOString(),
       };
       const deduped = [nextItem, ...previous.filter((item: any) => item?.dishName !== dishName)];
@@ -125,6 +143,10 @@ export default function RecipeDetailsScreen() {
             ingredient,
             cuisine: selectedCuisine,
             language: selectedLang,
+            generationMode,
+            dietPreference,
+            spiceLevel,
+            ...(maxCaloriesPerMeal != null ? { maxCaloriesPerMeal } : {}),
           }),
         },
         70000
@@ -158,7 +180,7 @@ export default function RecipeDetailsScreen() {
 
   useEffect(() => {
     const loadRecipe = async () => {
-      const cacheKey = `${selectedCuisine}__${selectedLang}__${ingredient.trim().toLowerCase()}__${recipeName}`;
+      const cacheKey = `${generationMode}__${dietPreference}__${spiceLevel}__${maxCaloriesPerMeal ?? ''}__${selectedCuisine}__${selectedLang}__${ingredient.trim().toLowerCase()}__${recipeName}`;
 
       setLoading(true);
       setErrorMessage('');
@@ -192,7 +214,7 @@ export default function RecipeDetailsScreen() {
     };
 
     loadRecipe();
-  }, [ingredient, recipeName, selectedCuisine, selectedLang]);
+  }, [ingredient, recipeName, selectedCuisine, selectedLang, generationMode, dietPreference, spiceLevel, maxCaloriesPerMeal]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -201,7 +223,11 @@ export default function RecipeDetailsScreen() {
           <Text style={styles.backButtonText}>Back to Recipe List</Text>
         </TouchableOpacity>
         <Text style={styles.summaryText}>
-          Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}
+          Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}  |  Mode:{' '}
+          {generationMode}
+          {'  |  '}
+          Diet: {dietPreference}  |  Spice: {spiceLevel}
+          {maxCaloriesPerMeal != null ? `  |  Max kcal: ${maxCaloriesPerMeal}` : ''}
         </Text>
         <TouchableOpacity style={styles.saveButton} onPress={saveRecipe} disabled={saving || loading || !recipe}>
           <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>

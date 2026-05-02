@@ -14,6 +14,57 @@ const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
+const normalizeGenerationMode = (mode) => (mode === 'creative' ? 'creative' : 'strict');
+
+const normalizeDietPreference = (value) =>
+  value === 'vegetarian' || value === 'vegan' || value === 'gluten_free' ? value : 'none';
+
+const normalizeSpiceLevel = (value) =>
+  value === 'mild' || value === 'medium' || value === 'hot' ? value : 'medium';
+
+const coerceCalories = (raw) => {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw).replace(/\D/g, ''), 10);
+  if (!Number.isFinite(n) || n < 1 || n > 8000) return null;
+  return n;
+};
+
+/** Builds English constraint lines for Gemini (recipe names + full recipes). */
+function buildNutritionConstraints({ dietPreference, spiceLevel, maxCaloriesPerMeal }) {
+  const diet = normalizeDietPreference(dietPreference);
+  const spice = normalizeSpiceLevel(spiceLevel);
+  const cal = coerceCalories(maxCaloriesPerMeal);
+  const parts = [];
+
+  if (diet === 'vegan') {
+    parts.push(
+      'Diet is strictly VEGAN: no meat, fish, seafood, eggs, dairy, or honey; use only plant-based ingredients and substitutions.'
+    );
+  } else if (diet === 'vegetarian') {
+    parts.push('Diet is VEGETARIAN: no meat, fish, or seafood; eggs and dairy are allowed unless otherwise incompatible.');
+  } else if (diet === 'gluten_free') {
+    parts.push(
+      'Diet is GLUTEN-FREE: no wheat, barley, rye, or malt; suggest GF substitutes (e.g., rice, labeled GF flour/soy sauce).'
+    );
+  }
+
+  if (spice === 'mild') {
+    parts.push('Spice/heat: MILD — very little chili heat; aromatic spices OK without strong burn.');
+  } else if (spice === 'hot') {
+    parts.push('Spice/heat: HOT — noticeably spicy; use chilies generously where fitting.');
+  } else {
+    parts.push('Spice/heat: MEDIUM — balanced chili heat.');
+  }
+
+  if (cal != null) {
+    parts.push(
+      `Calorie target: aim for roughly ${cal} kcal or less per meal/serving where reasonable; mention approximate calories if possible.`
+    );
+  }
+
+  return parts.join(' ');
+}
+
 const parseRecipeList = (text) =>
   text
     .split('\n')
@@ -75,9 +126,12 @@ async function generateText(prompt, timeoutMs = 30000) {
   return null;
 }
 
+const IMAGE_PROMPT_GLOBAL_SUFFIX =
+  'ultra realistic food photography, natural soft light, close-up plated dish in a bowl or plate, no text, no watermark, no logos. Species and ingredient fidelity: depict exactly what the dish text describes; when a specific fish or vegetable is named, match that type — do not substitute a different species or a generic look-alike; for small river fish curries show small whole fish or typical small-fish cuts, not thick circular steaks from large carps unless the dish is explicitly large carp (rohu, katla).';
+
 async function generateImageFromGemini(imagePrompt, timeoutMs = 45000) {
   if (!GEMINI_API_KEY) return null;
-  const finalPrompt = `${imagePrompt}, ultra realistic food photography, natural light, close-up plated dish, no text, no watermark`;
+  const finalPrompt = `${imagePrompt}, ${IMAGE_PROMPT_GLOBAL_SUFFIX}`;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     GEMINI_IMAGE_MODEL
   )}:generateContent?key=${encodeURIComponent(
@@ -136,17 +190,34 @@ const buildDishSpecificImagePrompt = ({ dishName, cuisine, queryText, basePrompt
     return `${base}, Bangladeshi red amaranth stir fry (lal shak bhaji), deep red and purple amaranth leaves and stems, authentic home-cooked plating, avoid green spinach look`;
   }
 
+  // Pabda = small butter catfish — models often default to large carp steaks; spell morphology + negatives.
   if (
     combined.includes('পাবদা') ||
-    combined.includes('সরষে') ||
-    combined.includes('sorshe') ||
-    combined.includes('sorse') ||
-    combined.includes('pabda')
+    combined.includes('pabda') ||
+    combined.includes('pabdha') ||
+    combined.includes('ompok')
   ) {
-    return `${base}, Bangladeshi sorshe pabda fish curry, pabda fish pieces in yellow mustard gravy, green chili, turmeric tone, served in a Bengali home-style steel or ceramic bowl, top-down or 45 degree food photography, realistic cooked fish texture, no humans, no cats, no animals other than cooked fish, no street scene, no text, no watermark`;
+    const isMustard =
+      combined.includes('সরষে') ||
+      combined.includes('sorshe') ||
+      combined.includes('sorse') ||
+      combined.includes('mustard');
+    const gravyHint = isMustard
+      ? 'golden-yellow mustard-based gravy (shorshe), nigella seeds, green chilies visible'
+      : 'light Bengali jhol-style gravy, turmeric, green chili, mustard oil sheen';
+    return `${base}, Bangladeshi home-style pabda fish curry: ONLY small freshwater butter catfish (pabda / Ompok bimaculatus type)—two to four small whole fish or small curved bodies in the bowl, silvery-pink cooked skin, delicate size typical of pabda; absolutely avoid thick round cross-section bone-in steaks from large carps; avoid rohu, katla, salmon-style steaks, or oversized fish chunks; ${gravyHint}; rustic ceramic or steel bowl; top-down or 45 degree food photo; cooked fish texture; no humans; no animals except the cooked fish in the dish`;
   }
 
-  return `${base}, authentic ${cuisine} dish, accurate ingredients and natural colors`;
+  if (
+    combined.includes('ইলিশ') ||
+    combined.includes('ilish') ||
+    combined.includes('hilsa') ||
+    combined.includes('ilish maach')
+  ) {
+    return `${base}, Bangladeshi hilsa (ilish) preparation: long silver-blue hilsa pieces with distinctive oily sheen and typical ilish shape—not carp steaks; mustard or light gravy as fits the dish; authentic Bengali plating`;
+  }
+
+  return `${base}, authentic ${cuisine} dish, faithful to named main ingredients, accurate colors and realistic textures`;
 };
 
 app.get('/api/v1/health', (_req, res) => {
@@ -162,19 +233,38 @@ app.get('/api/v1/health', (_req, res) => {
 
 app.post('/api/v1/ai/recipes/list', async (req, res) => {
   try {
-    const { query, ingredient, cuisine = 'Bangladeshi', language = 'বাংলা' } = req.body || {};
+    const {
+      query,
+      ingredient,
+      cuisine = 'Bangladeshi',
+      language = 'বাংলা',
+      generationMode: rawMode,
+      dietPreference,
+      spiceLevel,
+      maxCaloriesPerMeal,
+    } = req.body || {};
+    const generationMode = normalizeGenerationMode(rawMode);
     const userQuery = String(query || ingredient || '').trim();
 
     if (!userQuery) {
       return res.status(400).json({ message: 'query or ingredient is required' });
     }
 
+    const modeLine =
+      generationMode === 'creative'
+        ? `Creative mode: suggest distinctive, appetizing names—including fusion or modern twists where fitting—while staying achievable with common ingredients.`
+        : `Strict mode: suggest familiar, reliable ${cuisine} dish names people recognize; classic combinations; avoid gimmicky fusion unless the input clearly asks for it.`;
+
+    const nutritionBlock = buildNutritionConstraints({ dietPreference, spiceLevel, maxCaloriesPerMeal });
+
     const prompt = `You are ChefAI.
-Create exactly 10 popular ${cuisine} recipe names based on this user input: "${userQuery}".
+Create exactly 10 ${cuisine} recipe names based on this user input: "${userQuery}".
 The input may be an ingredient name or a dish name.
+${modeLine}
+${nutritionBlock ? `User nutrition preferences (you MUST only suggest dishes that can honor these): ${nutritionBlock}` : ''}
 Return only the list in ${language}, one line each.`;
 
-    const text = await generateText(prompt, 25000);
+    const text = await generateText(prompt, 35000);
     if (!text) {
       // Safe fallback if key is not configured yet.
       const fallbackRecipes = [
@@ -205,12 +295,32 @@ Return only the list in ${language}, one line each.`;
 
 app.post('/api/v1/ai/recipes/details', async (req, res) => {
   try {
-    const { recipeName = 'Recipe', query = '', ingredient = '', cuisine = 'Bangladeshi', language = 'বাংলা' } = req.body || {};
+    const {
+      recipeName = 'Recipe',
+      query = '',
+      ingredient = '',
+      cuisine = 'Bangladeshi',
+      language = 'বাংলা',
+      generationMode: rawMode,
+      dietPreference,
+      spiceLevel,
+      maxCaloriesPerMeal,
+    } = req.body || {};
+    const generationMode = normalizeGenerationMode(rawMode);
     const userQuery = String(query || ingredient || '').trim();
+
+    const modeBlock =
+      generationMode === 'creative'
+        ? `Writing style: CREATIVE — include tasteful variations (heat level, protein swap, regional twist) where helpful; encourage experimentation while keeping steps clear.`
+        : `Writing style: STRICT — conservative, precise steps; typical quantities (cups/tbsp where sensible); minimal improvisation; focus on repeatable results.`;
+
+    const nutritionBlock = buildNutritionConstraints({ dietPreference, spiceLevel, maxCaloriesPerMeal });
 
     const prompt = `Create a complete ${cuisine} recipe in ${language}.
 Recipe target: "${recipeName}".
 User input context (ingredient or dish): "${userQuery}".
+${modeBlock}
+${nutritionBlock ? `User nutrition preferences (apply to ingredients, substitutions, and steps): ${nutritionBlock}` : ''}
 Return strict JSON with keys:
 {
   "dishName": "string",
