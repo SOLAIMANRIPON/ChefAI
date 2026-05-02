@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import React from 'react';
 import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
 const RECENT_SEARCHES_STORAGE_KEY = 'chefai_recent_searches_v1';
@@ -43,6 +44,7 @@ type RecentSearch = {
 };
 
 export default function ExploreScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [savedRecipes, setSavedRecipes] = React.useState<SavedRecipe[]>([]);
   const [recentViews, setRecentViews] = React.useState<RecentView[]>([]);
@@ -112,23 +114,29 @@ export default function ExploreScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Explore</Text>
-      <Text style={styles.subtitle}>Saved recipes, trending dishes, and recent history</Text>
+      <Text style={styles.title}>{t('explore.title')}</Text>
+      <Text style={styles.subtitle}>{t('explore.subtitle')}</Text>
+
+      <TouchableOpacity
+        style={styles.settingsEntry}
+        onPress={() => router.push('/settings')}
+        activeOpacity={0.85}>
+        <Text style={styles.settingsEntryTitle}>{t('explore.openSettings')}</Text>
+        <Text style={styles.settingsEntryDesc}>{t('explore.openSettingsDesc')}</Text>
+      </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.shoppingEntry}
         onPress={() => router.push('/shopping-lists')}
         activeOpacity={0.85}>
-        <Text style={styles.shoppingEntryTitle}>Shopping Lists</Text>
-        <Text style={styles.shoppingEntryDesc}>
-          সেভ করা রেসিপি বেছে নিলে উপকরণের লিস্ট স্বয়ংক্রিয়ভাবে তৈরি হয়—বাজারে কিনে ফেললে টিক দিয়ে ট্র্যাক করুন।
-        </Text>
+        <Text style={styles.shoppingEntryTitle}>{t('explore.shoppingTitle')}</Text>
+        <Text style={styles.shoppingEntryDesc}>{t('explore.shoppingDesc')}</Text>
       </TouchableOpacity>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Saved Recipes</Text>
+        <Text style={styles.sectionTitle}>{t('explore.savedRecipes')}</Text>
         {savedRecipes.length === 0 ? (
-          <Text style={styles.emptyText}>No saved recipes yet. Save from recipe details.</Text>
+          <Text style={styles.emptyText}>{t('explore.savedEmpty')}</Text>
         ) : (
           savedRecipes.slice(0, 12).map((item) => (
             <TouchableOpacity
@@ -147,7 +155,7 @@ export default function ExploreScreen() {
                 )}>
               <Text style={styles.itemTitle}>{item.dishName}</Text>
               <Text style={styles.itemMeta}>
-                {item.cuisine || 'Cuisine'} | {item.language || 'Language'}
+                {item.cuisine || t('explore.cuisine')} | {item.language || t('explore.language')}
               </Text>
             </TouchableOpacity>
           ))
@@ -155,9 +163,9 @@ export default function ExploreScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trending Dishes</Text>
+        <Text style={styles.sectionTitle}>{t('explore.trending')}</Text>
         {trendingDishes.length === 0 ? (
-          <Text style={styles.emptyText}>No trending data yet. Open more recipes to build trends.</Text>
+          <Text style={styles.emptyText}>{t('explore.trendingEmpty')}</Text>
         ) : (
           trendingDishes.map((name) => (
             <TouchableOpacity key={name} style={styles.item} onPress={() => openRecipe(name)}>
@@ -168,9 +176,9 @@ export default function ExploreScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recent History</Text>
+        <Text style={styles.sectionTitle}>{t('explore.recentHistory')}</Text>
         {recentSearches.length === 0 ? (
-          <Text style={styles.emptyText}>No recent searches yet.</Text>
+          <Text style={styles.emptyText}>{t('explore.recentEmpty')}</Text>
         ) : (
           recentSearches.slice(0, 12).map((item, idx) => (
             <TouchableOpacity
@@ -195,6 +203,16 @@ const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: '#000', paddingBottom: 80 },
   title: { color: '#d3b275', fontSize: 30, fontWeight: 'bold', marginTop: 50 },
   subtitle: { color: '#9a9a9a', fontSize: 13, marginTop: 6, marginBottom: 16 },
+  settingsEntry: {
+    backgroundColor: '#101820',
+    borderWidth: 1,
+    borderColor: '#2a3540',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+  },
+  settingsEntryTitle: { color: '#c9af80', fontSize: 17, fontWeight: '700', marginBottom: 8 },
+  settingsEntryDesc: { color: '#a8a8a8', fontSize: 13, lineHeight: 20 },
   shoppingEntry: {
     backgroundColor: '#141208',
     borderWidth: 1,

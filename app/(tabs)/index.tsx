@@ -689,7 +689,7 @@ export default function ChefAI() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   scrollContent: { padding: 20, alignItems: 'center' },
-  header: { marginTop: 80, marginBottom: 45, alignItems: 'center', justifyContent: 'center' },
+  header: { marginTop: 28, marginBottom: 45, alignItems: 'center', justifyContent: 'center' },
   logo: { width: width * 0.85, height: 110, marginBottom: -5 },
   tagline: { color: '#d3b275', fontSize: 10, letterSpacing: 2, fontWeight: '500', opacity: 0.9 },
   pickerRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 16 },

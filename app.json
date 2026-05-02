@@ -21,6 +21,15 @@
       },
       "package": "com.solaiman.chefai"
     },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ChefAI needs photo access so you can share your cooking in Community."
+        }
+      ],
+      "expo-localization"
+    ],
     "extra": {
       "eas": {
         "projectId": "9c603898-4854-40bc-96bc-a2341cf8dd72"
