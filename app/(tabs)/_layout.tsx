@@ -1,20 +1,34 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { IconSymbol } from '@/components/ui/icon-symbol';
 
+/** Extra lift so Home/Explore stay above Android 3-button / gesture nav */
+function useTabBarBottomPadding(): number {
+  const insets = useSafeAreaInsets();
+  const base = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
+  const lift = Platform.OS === 'android' ? 22 : 14;
+  return base + lift;
+}
+
 export default function TabLayout() {
+  const tabPadBottom = useTabBarBottomPadding();
+  const tabBarHeight = 52 + tabPadBottom + 12;
+
   return (
     <Tabs
       screenOptions={{
-        // নীল কালার বদলে আপনার সেই নির্দিষ্ট গোল্ডেন কালার দেওয়া হলো
-        tabBarActiveTintColor: '#c9af80', 
-        tabBarInactiveTintColor: '#444444', // ইনঅ্যাক্টিভ অবস্থায় ডার্ক অ্যাশ
+        tabBarActiveTintColor: '#c9af80',
+        tabBarInactiveTintColor: '#444444',
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#000000', // নিচের বারটি এখন পিওর ব্ল্যাক
-          borderTopWidth: 0,          // কোনো বর্ডার থাকবে না, একদম ক্লিন লুক
-          height: 65,                 // বারের হাইট একটু বাড়ানো হলো প্রিমিয়াম ফিনিশের জন্য
-          paddingBottom: 10,
+          backgroundColor: '#000000',
+          borderTopWidth: 0,
+          height: tabBarHeight,
+          paddingBottom: tabPadBottom,
+          paddingTop: 12,
         },
       }}>
       <Tabs.Screen

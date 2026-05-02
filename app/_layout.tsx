@@ -18,6 +18,8 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-list" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-details" options={{ headerShown: false }} />
+        <Stack.Screen name="shopping-lists" options={{ headerShown: false }} />
+        <Stack.Screen name="shopping-list" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />

@@ -18,10 +18,12 @@ import {
   View,
 } from 'react-native';
 
+import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import {
   type DietConflictReason,
   analyzeDietInputConflict,
 } from '@/constants/diet-input-conflict';
+import { languageAliasByCountry } from '@/constants/language-alias';
 import {
   type DietPreference,
   type SpiceLevel,
@@ -264,29 +266,6 @@ function dietConflictMessage(
   }
 }
 
-const languageAliasByCountry: Record<string, keyof typeof uiTranslations> = {
-  Bangladesh: 'বাংলা',
-  India: 'Hindi',
-  Pakistan: 'Urdu',
-  China: 'Chinese',
-  Japan: 'Japanese',
-  Thailand: 'English',
-  Korea: 'Korean',
-  Turkey: 'Turkish',
-  Iran: 'Persian',
-  'Saudi Arabia': 'Arabic',
-  'United Arab Emirates': 'Arabic',
-  Italy: 'English',
-  France: 'French',
-  Spain: 'Spanish',
-  Greece: 'Greek',
-  Mexico: 'Spanish',
-  'United States': 'English',
-  Brazil: 'Portuguese',
-  Argentina: 'Spanish',
-  'United Kingdom': 'English',
-};
-
 export default function ChefAI() {
   const params = useLocalSearchParams<{ ingredient?: string }>();
   const router = useRouter();
@@ -294,8 +273,8 @@ export default function ChefAI() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   
-  const [selectedLang, setSelectedLang] = useState('বাংলা');
-  const [selectedCuisine, setSelectedCuisine] = useState('Bangladeshi');
+  const [selectedLang, setSelectedLang] = useState(DEFAULT_UI_LANGUAGE);
+  const [selectedCuisine, setSelectedCuisine] = useState(DEFAULT_CUISINE);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('strict');
   const [dietPreference, setDietPreference] = useState<DietPreference>('none');
   const [spiceLevel, setSpiceLevel] = useState<SpiceLevel>('medium');
@@ -586,7 +565,7 @@ export default function ChefAI() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         
         <View style={styles.header}>
           <Image source={require('@/assets/images/logo-main.png')} style={styles.logo} resizeMode="contain" />
@@ -783,4 +762,4 @@ const styles = StyleSheet.create({
   modalItemText: { color: '#fff', fontSize: 18, textAlign: 'center' },
   closeBtn: { marginTop: 20, padding: 10, backgroundColor: '#222', borderRadius: 10 },
   closeBtnText: { color: '#fff', textAlign: 'center', fontWeight: 'bold', letterSpacing: 2 },
-});
+}); 

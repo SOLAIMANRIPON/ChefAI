@@ -1,8 +1,12 @@
+import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
+import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
+import { getSaveRecipeAlerts } from '@/constants/save-recipe-alerts';
 import {
   normalizeDietPreference,
   normalizeSpiceLevel,
   parseMaxCaloriesParam,
 } from '@/constants/recipe-preferences';
+import { makeShortRecipeId, upsertSavedRecipe, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -19,7 +23,6 @@ import {
 } from 'react-native';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
-const SAVED_RECIPES_STORAGE_KEY = 'chefai_saved_recipes_v1';
 const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
 // Locked timeout/retry policy for production stability.
 const recipeDetailsCache: Record<string, { dishName: string; recipe: string; imageUrl: string }> = {};
@@ -44,6 +47,15 @@ const cleanRecipeText = (text: string) =>
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+/** Base64 data URLs are huge and break AsyncStorage / localStorage quota; keep only short http(s) images. */
+const persistableImageUrl = (url: string) => {
+  const u = url.trim();
+  if (!u) return '';
+  if (u.startsWith('data:')) return '';
+  if (u.length > 8000) return '';
+  return u;
+};
+
 export default function RecipeDetailsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -59,8 +71,8 @@ export default function RecipeDetailsScreen() {
 
   const recipeName = params.recipeName ?? 'Recipe';
   const ingredient = params.ingredient ?? '';
-  const selectedCuisine = params.selectedCuisine ?? 'Bangladeshi';
-  const selectedLang = params.selectedLang ?? 'বাংলা';
+  const selectedCuisine = params.selectedCuisine ?? DEFAULT_CUISINE;
+  const selectedLang = params.selectedLang ?? DEFAULT_UI_LANGUAGE;
   const generationMode =
     params.generationMode === 'creative' || params.generationMode === 'strict' ? params.generationMode : 'strict';
   const dietPreference = normalizeDietPreference(params.dietPreference);
@@ -98,14 +110,14 @@ export default function RecipeDetailsScreen() {
   const saveRecipe = async () => {
     if (!recipe.trim()) return;
     setSaving(true);
+    const alerts = getSaveRecipeAlerts(selectedLang);
     try {
-      const raw = await AsyncStorage.getItem(SAVED_RECIPES_STORAGE_KEY);
-      const previous = raw ? JSON.parse(raw) : [];
-      const nextItem = {
-        id: `${dishName}-${Date.now()}`,
+      const imageToStore = persistableImageUrl(imageUrl);
+      const nextItem: StoredSavedRecipe = {
+        id: makeShortRecipeId(),
         dishName,
         recipe,
-        imageUrl,
+        imageUrl: imageToStore,
         ingredient,
         cuisine: selectedCuisine,
         language: selectedLang,
@@ -115,11 +127,17 @@ export default function RecipeDetailsScreen() {
         maxCaloriesPerMeal: maxCaloriesPerMeal != null ? String(maxCaloriesPerMeal) : '',
         savedAt: new Date().toISOString(),
       };
-      const deduped = [nextItem, ...previous.filter((item: any) => item?.dishName !== dishName)];
-      await AsyncStorage.setItem(SAVED_RECIPES_STORAGE_KEY, JSON.stringify(deduped.slice(0, 50)));
-      Alert.alert('Saved', 'Recipe saved to Explore tab.');
-    } catch {
-      Alert.alert('Failed', 'Could not save recipe right now.');
+      await upsertSavedRecipe(nextItem);
+      const usedDataImage = imageUrl.trim().startsWith('data:') && !imageToStore;
+      Alert.alert(
+        alerts.savedTitle,
+        usedDataImage ? alerts.savedBodyNoImage : alerts.savedBody
+      );
+    } catch (e) {
+      if (__DEV__ && e instanceof Error) {
+        console.warn('saveRecipe failed:', e.message);
+      }
+      Alert.alert(alerts.failedTitle, alerts.failedBody);
     } finally {
       setSaving(false);
     }
@@ -218,7 +236,10 @@ export default function RecipeDetailsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <View style={styles.page}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 28 + HOME_EXPLORE_NAV_RESERVED_BOTTOM }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Back to Recipe List</Text>
         </TouchableOpacity>
@@ -270,12 +291,15 @@ export default function RecipeDetailsScreen() {
           </>
         )}
       </ScrollView>
+      <HomeExploreNav />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
+  page: { flex: 1 },
   scrollContent: { padding: 20, alignItems: 'center' },
   backButton: {
     alignSelf: 'flex-start',

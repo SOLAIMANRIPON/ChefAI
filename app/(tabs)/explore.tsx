@@ -4,13 +4,14 @@ import {
   normalizeDietPreference,
   normalizeSpiceLevel,
 } from '@/constants/recipe-preferences';
+import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
+import { loadSavedRecipes } from '@/constants/saved-recipes-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-const SAVED_RECIPES_STORAGE_KEY = 'chefai_saved_recipes_v1';
 const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
 const RECENT_SEARCHES_STORAGE_KEY = 'chefai_recent_searches_v1';
 
@@ -49,12 +50,12 @@ export default function ExploreScreen() {
 
   const loadExploreData = React.useCallback(async () => {
     try {
-      const [savedRaw, viewsRaw, searchesRaw] = await Promise.all([
-        AsyncStorage.getItem(SAVED_RECIPES_STORAGE_KEY),
+      const [savedList, viewsRaw, searchesRaw] = await Promise.all([
+        loadSavedRecipes(),
         AsyncStorage.getItem(RECENT_VIEWS_STORAGE_KEY),
         AsyncStorage.getItem(RECENT_SEARCHES_STORAGE_KEY),
       ]);
-      setSavedRecipes(savedRaw ? JSON.parse(savedRaw) : []);
+      setSavedRecipes(savedList);
       setRecentViews(viewsRaw ? JSON.parse(viewsRaw) : []);
       setRecentSearches(searchesRaw ? JSON.parse(searchesRaw) : []);
     } catch {
@@ -86,8 +87,8 @@ export default function ExploreScreen() {
   const openRecipe = (
     recipeName: string,
     ingredient = '',
-    cuisine = 'Bangladeshi',
-    language = 'বাংলা',
+    cuisine = DEFAULT_CUISINE,
+    language = DEFAULT_UI_LANGUAGE,
     generationMode: 'strict' | 'creative' = 'strict',
     dietPreference: DietPreference = 'none',
     spiceLevel: SpiceLevel = 'medium',
@@ -109,9 +110,20 @@ export default function ExploreScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <SafeAreaView style={styles.safe}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Explore</Text>
       <Text style={styles.subtitle}>Saved recipes, trending dishes, and recent history</Text>
+
+      <TouchableOpacity
+        style={styles.shoppingEntry}
+        onPress={() => router.push('/shopping-lists')}
+        activeOpacity={0.85}>
+        <Text style={styles.shoppingEntryTitle}>Shopping Lists</Text>
+        <Text style={styles.shoppingEntryDesc}>
+          সেভ করা রেসিপি বেছে নিলে উপকরণের লিস্ট স্বয়ংক্রিয়ভাবে তৈরি হয়—বাজারে কিনে ফেললে টিক দিয়ে ট্র্যাক করুন।
+        </Text>
+      </TouchableOpacity>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Saved Recipes</Text>
@@ -174,13 +186,25 @@ export default function ExploreScreen() {
         )}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#000' },
   container: { padding: 20, backgroundColor: '#000', paddingBottom: 80 },
   title: { color: '#d3b275', fontSize: 30, fontWeight: 'bold', marginTop: 50 },
-  subtitle: { color: '#9a9a9a', fontSize: 13, marginTop: 6, marginBottom: 20 },
+  subtitle: { color: '#9a9a9a', fontSize: 13, marginTop: 6, marginBottom: 16 },
+  shoppingEntry: {
+    backgroundColor: '#141208',
+    borderWidth: 1,
+    borderColor: '#3d3420',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 18,
+  },
+  shoppingEntryTitle: { color: '#d3b275', fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  shoppingEntryDesc: { color: '#a8a8a8', fontSize: 13, lineHeight: 20 },
   section: {
     backgroundColor: '#111',
     borderWidth: 1,

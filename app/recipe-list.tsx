@@ -1,3 +1,5 @@
+import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
+import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import {
   normalizeDietPreference,
   normalizeSpiceLevel,
@@ -19,8 +21,8 @@ export default function RecipeListScreen() {
   }>();
 
   const ingredient = params.ingredient ?? '';
-  const selectedCuisine = params.selectedCuisine ?? 'Bangladeshi';
-  const selectedLang = params.selectedLang ?? 'বাংলা';
+  const selectedCuisine = params.selectedCuisine ?? DEFAULT_CUISINE;
+  const selectedLang = params.selectedLang ?? DEFAULT_UI_LANGUAGE;
   const generationMode =
     params.generationMode === 'creative' || params.generationMode === 'strict' ? params.generationMode : 'strict';
   const dietPreference = normalizeDietPreference(params.dietPreference);
@@ -57,7 +59,10 @@ export default function RecipeListScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <View style={styles.page}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 28 + HOME_EXPLORE_NAV_RESERVED_BOTTOM }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
@@ -93,12 +98,15 @@ export default function RecipeListScreen() {
           )}
         </View>
       </ScrollView>
+      <HomeExploreNav />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
+  page: { flex: 1 },
   scrollContent: { padding: 20, alignItems: 'center' },
   backButton: {
     alignSelf: 'flex-start',

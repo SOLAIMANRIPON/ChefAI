@@ -72,6 +72,58 @@ const parseRecipeList = (text) =>
     .filter(Boolean)
     .slice(0, 10);
 
+const parseStringArrayJson = (text) => {
+  if (!text || typeof text !== 'string') return [];
+  const trimmed = text.trim();
+  const tryParse = (chunk) => {
+    try {
+      const v = JSON.parse(chunk);
+      if (Array.isArray(v) && v.every((x) => typeof x === 'string')) {
+        return v.map((s) => s.trim()).filter(Boolean);
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+  const direct = tryParse(trimmed);
+  if (direct) return direct.slice(0, 60);
+  const block = trimmed.match(/\[[\s\S]*\]/);
+  if (block) {
+    const fromBlock = tryParse(block[0]);
+    if (fromBlock) return fromBlock.slice(0, 60);
+  }
+  return [];
+};
+
+/** Very small fallback if Gemini is off: pick short lines that look like ingredients. */
+const fallbackShoppingItemsFromRecipe = (recipeText) => {
+  const lines = String(recipeText || '')
+    .split('\n')
+    .map((l) => l.replace(/\*\*/g, '').trim())
+    .filter(Boolean);
+  const out = [];
+  let inBlock = false;
+  for (const line of lines) {
+    const low = line.toLowerCase();
+    if (/^ingredients\b|^উপকরণ\b|^you will need\b/i.test(line)) {
+      inBlock = true;
+      continue;
+    }
+    if (inBlock && /^(step|ধাপ|method|preparation)\b/i.test(line)) break;
+    if (inBlock && (line.startsWith('•') || line.startsWith('-') || line.startsWith('*'))) {
+      out.push(line.replace(/^[•\-\*]\s*/, '').trim());
+    }
+  }
+  if (out.length) return out.slice(0, 40);
+  for (const line of lines) {
+    if (line.length > 5 && line.length < 100 && /\d/.test(line) && /(g|kg|ml|cup|tbsp|tsp|চামচ|গ্রাম|টা|কাপ)/i.test(line)) {
+      out.push(line.replace(/^\d+[\).\s]+/, '').trim());
+    }
+  }
+  return [...new Set(out)].slice(0, 25);
+};
+
 const buildDishImageUrl = (seedText) => {
   const label = encodeURIComponent(String(seedText || 'ChefAI Food').slice(0, 40));
   return `https://placehold.co/1024x768/111111/d3b275?text=${label}`;
@@ -371,6 +423,39 @@ Return strict JSON with keys:
     console.error('recipes/details failed:', error);
     return res.status(500).json({
       message: error instanceof Error ? error.message : 'Failed to generate recipe details',
+    });
+  }
+});
+
+app.post('/api/v1/ai/recipes/shopping-list', async (req, res) => {
+  try {
+    const { recipeText = '', dishName = 'Recipe', language = 'বাংলা' } = req.body || {};
+    const body = String(recipeText || '').trim();
+    if (!body) {
+      return res.status(400).json({ message: 'recipeText is required' });
+    }
+
+    const prompt = `You extract a practical grocery shopping list from a recipe.
+Dish: "${String(dishName).slice(0, 200)}"
+Recipe text:
+"""
+${body.slice(0, 12000)}
+"""
+Return ONLY a JSON array of strings. Each string is ONE ingredient NAME only for grocery shopping — NO amounts, NO units (no cups, tsp, grams, কাপ, চামচ, কেজি, টি counts). Same language as the recipe (${language}). Merge duplicates (e.g. "onion" twice → once). Order: proteins/main veg first, then spices/pantry, max 35 items.`;
+
+    const text = await generateText(prompt, 25000);
+    let items = parseStringArrayJson(text || '');
+    if (!items.length) {
+      items = fallbackShoppingItemsFromRecipe(body);
+    }
+    if (!items.length) {
+      return res.status(502).json({ message: 'Could not build shopping list' });
+    }
+    return res.json({ items });
+  } catch (error) {
+    console.error('recipes/shopping-list failed:', error);
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Failed to generate shopping list',
     });
   }
 });
