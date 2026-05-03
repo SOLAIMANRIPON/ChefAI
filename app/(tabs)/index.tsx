@@ -49,13 +49,29 @@ export default function HomeScreen() {
   const router = useRouter();
   const [selectedLang, setSelectedLang] = useState(DEFAULT_UI_LANGUAGE);
   const [selectedCuisine, setSelectedCuisine] = useState(DEFAULT_CUISINE);
+  const [langCommitted, setLangCommitted] = useState(false);
+  const [cuisineCommitted, setCuisineCommitted] = useState(false);
   const [langModal, setLangModal] = useState(false);
   const [cuisineModal, setCuisineModal] = useState(false);
+
+  const nextVisualActive = langCommitted && cuisineCommitted;
 
   const goCraft = () => {
     router.push({
       pathname: '/craft',
       params: { selectedLang, selectedCuisine },
+    });
+  };
+
+  const handleNextPress = () => {
+    if (nextVisualActive) {
+      goCraft();
+      return;
+    }
+    setLangCommitted(true);
+    setCuisineCommitted(true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(goCraft);
     });
   };
 
@@ -112,67 +128,127 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <Image source={require('@/assets/images/logo-main.png')} style={styles.logo} resizeMode="contain" />
-          <Text style={styles.tagline}>Your AI Powered Kitchen Assistant</Text>
+      <View style={styles.screenBody}>
+        <View style={styles.topZone}>
+          <View style={styles.header}>
+            <Image source={require('@/assets/images/logo-main.png')} style={styles.logo} resizeMode="contain" />
+            <Text style={styles.tagline}>YOUR AI POWERED KITCHEN ASSISTANT</Text>
+          </View>
         </View>
 
-        <View style={styles.lowerBlock}>
-        <View style={styles.pickerRow}>
-          <TouchableOpacity style={styles.pickerBtn} onPress={() => setLangModal(true)}>
-            <Text style={styles.pickerLabel}>LANGUAGE</Text>
-            <Text style={styles.pickerValue}>{selectedLang}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.pickerBtn} onPress={() => setCuisineModal(true)}>
-            <Text style={styles.pickerLabel}>CUISINE</Text>
-            <Text style={styles.pickerValue}>{selectedCuisine}</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={styles.middleFill}>
+          <View style={styles.centerZone}>
+            <View style={styles.pickerRow}>
+              <TouchableOpacity style={styles.pickerBtn} onPress={() => setLangModal(true)}>
+                <Text style={styles.pickerLabel}>LANGUAGE</Text>
+                <Text style={styles.pickerValue} numberOfLines={2}>
+                  {selectedLang}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.pickerBtn} onPress={() => setCuisineModal(true)}>
+                <Text style={styles.pickerLabel}>CUISINE</Text>
+                <Text style={styles.pickerValue} numberOfLines={2}>
+                  {selectedCuisine}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-        <TouchableOpacity
-          style={styles.nextButton}
-          onPress={goCraft}
-          accessibilityRole="button"
-          accessibilityLabel="Next">
-          <Text style={styles.nextButtonText}>NEXT</Text>
-        </TouchableOpacity>
-        <DesignerCreditLine />
+            <View style={styles.nextBlock}>
+              <TouchableOpacity
+                style={[styles.nextButton, !nextVisualActive && styles.nextButtonInactive]}
+                onPress={handleNextPress}
+                accessibilityRole="button"
+                accessibilityLabel="Next">
+                <Text style={[styles.nextButtonText, !nextVisualActive && styles.nextButtonTextInactive]}>NEXT</Text>
+              </TouchableOpacity>
+              <DesignerCreditLine style={styles.homeDesignerCredit} />
+            </View>
+          </View>
         </View>
-      </ScrollView>
+      </View>
 
-      <LanguageSelectionModal visible={langModal} onSelect={setSelectedLang} onClose={() => setLangModal(false)} />
-      <SelectionModal visible={cuisineModal} data={cuisines} onSelect={setSelectedCuisine} onClose={() => setCuisineModal(false)} title="Select Cuisine" />
+      <LanguageSelectionModal
+        visible={langModal}
+        onSelect={(value: string) => {
+          setSelectedLang(value);
+          setLangCommitted(true);
+        }}
+        onClose={() => setLangModal(false)}
+      />
+      <SelectionModal
+        visible={cuisineModal}
+        data={cuisines}
+        onSelect={(value: string) => {
+          setSelectedCuisine(value);
+          setCuisineCommitted(true);
+        }}
+        onClose={() => setCuisineModal(false)}
+        title="Select Cuisine"
+      />
     </SafeAreaView>
   );
 }
 
+const GOLD = '#d3b275';
+const NEXT_INACTIVE_BG = '#252525';
+const NEXT_INACTIVE_TEXT = '#555555';
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  scrollBody: {
-    flexGrow: 1,
+  screenBody: {
+    flex: 1,
     paddingHorizontal: 24,
-    paddingVertical: 32,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  topZone: { justifyContent: 'flex-start', alignItems: 'center', paddingTop: 28 },
+  /** Fills space below header so pickers + NEXT + credit stay grouped; credit sits right under NEXT */
+  middleFill: { flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' },
+  centerZone: { width: '100%', alignItems: 'center', justifyContent: 'center', gap: 22 },
+  nextBlock: { width: '100%', maxWidth: 420, alignItems: 'center', gap: 40 },
+  /** Flush under NEXT (overrides default footer margins) */
+  homeDesignerCredit: { marginTop: 0, marginBottom: 0 },
+  header: { alignItems: 'center', justifyContent: 'center' },
+  logo: { width: width * 0.88, height: 134, marginBottom: 2 },
+  tagline: {
+    color: GOLD,
+    fontSize: 10,
+    letterSpacing: 3,
+    fontWeight: '500',
+    opacity: 0.92,
+    marginTop: -2,
+    textAlign: 'center',
+  },
+  pickerRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
+  pickerBtn: {
+    flex: 1,
+    backgroundColor: '#111',
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    minHeight: 88,
     justifyContent: 'center',
-    alignItems: 'center',
   },
-  header: { alignItems: 'center', justifyContent: 'center', marginBottom: 0 },
-  logo: { width: width * 0.85, height: 110, marginBottom: -5 },
-  tagline: { color: '#d3b275', fontSize: 10, letterSpacing: 2, fontWeight: '500', opacity: 0.9 },
-  lowerBlock: { width: '100%', marginTop: 44, alignItems: 'center' },
-  pickerRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 22 },
-  pickerBtn: { backgroundColor: '#111', width: '48%', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#222' },
-  pickerLabel: { color: '#666', fontSize: 10, textTransform: 'uppercase', marginBottom: 5 },
-  pickerValue: { color: '#d3b275', fontSize: 16, fontWeight: 'bold' },
+  pickerLabel: { color: '#888', fontSize: 10, letterSpacing: 1.2, marginBottom: 8 },
+  pickerValue: { color: GOLD, fontSize: 17, fontWeight: 'bold' },
   nextButton: {
-    backgroundColor: '#d3b275',
-    paddingVertical: 11,
-    paddingHorizontal: 36,
-    borderRadius: 10,
-    minWidth: width * 0.42,
+    backgroundColor: GOLD,
+    paddingVertical: 15,
+    paddingHorizontal: 28,
+    borderRadius: 14,
+    width: '100%',
+    maxWidth: 420,
     alignItems: 'center',
   },
-  nextButtonText: { color: '#000', fontSize: 15, fontWeight: 'bold', letterSpacing: 1.6 },
+  nextButtonInactive: {
+    backgroundColor: NEXT_INACTIVE_BG,
+    borderWidth: 1,
+    borderColor: '#333333',
+  },
+  nextButtonText: { color: '#000', fontSize: 16, fontWeight: 'bold', letterSpacing: 2 },
+  nextButtonTextInactive: { color: NEXT_INACTIVE_TEXT },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { backgroundColor: '#111', width: '85%', borderRadius: 25, padding: 20, borderWidth: 1, borderColor: '#d3b275', maxHeight: '75%' },
   modalTitle: { color: '#d3b275', fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },

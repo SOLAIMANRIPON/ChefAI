@@ -5,21 +5,14 @@
     "guest": "Guest"
   },
   "settings": {
-    "title": "Language",
-    "subtitle": "Choose the language for buttons, labels, and system messages in ChefAI.",
-    "followSystem": "Default is English. Choose a language below, or match your device.",
-    "useDeviceLanguage": "Use device language",
-    "names": {
-      "en": "English",
-      "bn": "বাংলা",
-      "hi": "हिन्दी"
-    }
+    "title": "Settings",
+    "subtitle": "Manage your profile below."
   },
   "explore": {
     "title": "Explore",
     "subtitle": "Saved recipes, trending dishes, and recent history",
-    "openSettings": "App language & settings",
-    "openSettingsDesc": "English, বাংলা, हिन्दी — choose interface language.",
+    "openSettings": "Settings",
+    "openSettingsDesc": "Profile and preferences.",
     "shoppingTitle": "Shopping Lists",
     "shoppingDesc": "Pick saved recipes to auto-build ingredient lists — check items off as you shop.",
     "savedRecipes": "Saved Recipes",

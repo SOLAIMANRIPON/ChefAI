@@ -1,10 +1,15 @@
 import React from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, type TextStyle } from 'react-native';
+
+type Props = {
+  /** Merge overrides (e.g. home screen positions credit higher with larger marginBottom) */
+  style?: TextStyle;
+};
 
 /** Credit line at end of page content, above the tab bar (same placement as original craft screen) */
-export function DesignerCreditLine() {
+export function DesignerCreditLine({ style }: Props) {
   return (
-    <Text style={styles.text} accessibilityRole="text">
+    <Text style={[styles.text, style]} accessibilityRole="text">
       DESIGNED BY SOLAIMAN • 2026
     </Text>
   );
