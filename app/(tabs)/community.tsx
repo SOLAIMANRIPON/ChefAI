@@ -1,3 +1,4 @@
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { loadCommunityFeed } from '@/constants/community-feed';
 import {
   displayLikeCount,
@@ -152,6 +153,7 @@ export default function CommunityScreen() {
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#d3b275" />}
           ListEmptyComponent={<Text style={styles.empty}>{t('community.empty')}</Text>}
+          ListFooterComponent={DesignerCreditLine}
         />
       )}
     </SafeAreaView>

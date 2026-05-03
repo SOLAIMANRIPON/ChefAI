@@ -1,3 +1,4 @@
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { findPostById } from '@/constants/community-feed';
 import {
@@ -172,6 +173,7 @@ export default function CommunityPostScreen() {
               </TouchableOpacity>
             </>
           )}
+          <DesignerCreditLine />
         </ScrollView>
         <HomeExploreNav />
       </KeyboardAvoidingView>

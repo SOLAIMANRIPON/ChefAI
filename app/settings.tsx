@@ -1,3 +1,5 @@
+import { DesignerCreditLine } from '@/components/designer-footer';
+import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import {
   setFollowDeviceLanguage,
   setStoredAppLanguage,
@@ -29,6 +31,7 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.page}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <TouchableOpacity style={styles.back} onPress={() => router.back()} accessibilityRole="button">
           <Text style={styles.backText}>{t('common.back')}</Text>
@@ -61,14 +64,18 @@ export default function SettingsScreen() {
             );
           })}
         </View>
+        <DesignerCreditLine />
       </ScrollView>
+      <HomeExploreNav />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
-  scroll: { padding: 20, paddingBottom: 40 },
+  page: { flex: 1 },
+  scroll: { padding: 20, paddingBottom: HOME_EXPLORE_NAV_RESERVED_BOTTOM },
   back: { alignSelf: 'flex-start', marginBottom: 16 },
   backText: { color: '#d3b275', fontSize: 15, fontWeight: '600' },
   title: { color: '#d3b275', fontSize: 28, fontWeight: 'bold' },

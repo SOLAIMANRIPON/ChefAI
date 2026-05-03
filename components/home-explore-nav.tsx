@@ -8,23 +8,28 @@ const ACTIVE = '#d3b275';
 const INACTIVE = '#666666';
 
 /** Approximate footer height for ScrollView / FlatList content padding (+ lift offset) */
-export const HOME_EXPLORE_NAV_RESERVED_BOTTOM = 118;
+export const HOME_EXPLORE_NAV_RESERVED_BOTTOM = 124;
 
-/** Icon + title strip — fixed dock above safe area (stack screens only) */
+/** Bottom strip matching main tab bar (Home, Explore, Community) — used on stack screens above tabs */
 export function HomeExploreNav() {
   const router = useRouter();
   const segments = useSegments();
   const insets = useSafeAreaInsets();
 
   const isTabs = segments[0] === '(tabs)';
-  const isExploreTab = isTabs && segments[1] === 'explore';
-  const isHomeTab = isTabs && !isExploreTab;
+  const tabName = segments[1];
+  const isHomeTab = isTabs && (tabName === 'index' || tabName === undefined);
+  const isExploreTab = isTabs && tabName === 'explore';
+  const isCommunityTab = isTabs && tabName === 'community';
 
   const goHome = () => {
     router.replace('/');
   };
   const goExplore = () => {
     router.replace('/explore');
+  };
+  const goCommunity = () => {
+    router.replace('/community');
   };
 
   const safeBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 14 : 10);
@@ -38,7 +43,7 @@ export function HomeExploreNav() {
         accessibilityRole="button"
         accessibilityState={{ selected: isHomeTab }}
         accessibilityLabel="Home"
-        hitSlop={{ top: 8, bottom: 4, left: 16, right: 16 }}>
+        hitSlop={{ top: 8, bottom: 4, left: 12, right: 12 }}>
         <IconSymbol name="house.fill" size={26} color={isHomeTab ? ACTIVE : INACTIVE} />
         <Text style={[styles.title, isHomeTab && styles.titleActive]} numberOfLines={1}>
           Home
@@ -50,10 +55,22 @@ export function HomeExploreNav() {
         accessibilityRole="button"
         accessibilityState={{ selected: isExploreTab }}
         accessibilityLabel="Explore"
-        hitSlop={{ top: 8, bottom: 4, left: 16, right: 16 }}>
+        hitSlop={{ top: 8, bottom: 4, left: 12, right: 12 }}>
         <IconSymbol name="paperplane.fill" size={26} color={isExploreTab ? ACTIVE : INACTIVE} />
         <Text style={[styles.title, isExploreTab && styles.titleActive]} numberOfLines={1}>
           Explore
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.cell}
+        onPress={goCommunity}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isCommunityTab }}
+        accessibilityLabel="Community"
+        hitSlop={{ top: 8, bottom: 4, left: 12, right: 12 }}>
+        <IconSymbol name="person.3.fill" size={26} color={isCommunityTab ? ACTIVE : INACTIVE} />
+        <Text style={[styles.title, isCommunityTab && styles.titleActive]} numberOfLines={1}>
+          Community
         </Text>
       </TouchableOpacity>
     </View>
@@ -69,11 +86,10 @@ const styles = StyleSheet.create({
     borderTopColor: '#1a1a1a',
     backgroundColor: '#050505',
     paddingTop: 8,
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
   },
   cell: {
     flex: 1,
-    maxWidth: 160,
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingBottom: 4,

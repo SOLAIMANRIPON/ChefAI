@@ -1,3 +1,4 @@
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import { getSaveRecipeAlerts } from '@/constants/save-recipe-alerts';
@@ -290,6 +291,7 @@ export default function RecipeDetailsScreen() {
             ) : null}
           </>
         )}
+        <DesignerCreditLine />
       </ScrollView>
       <HomeExploreNav />
       </View>

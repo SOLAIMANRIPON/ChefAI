@@ -1,3 +1,4 @@
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { loadSavedRecipes, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -78,6 +79,7 @@ export default function ShoppingListsHubScreen() {
             ))}
           </View>
         )}
+        <DesignerCreditLine />
       </ScrollView>
       <HomeExploreNav />
       </View>

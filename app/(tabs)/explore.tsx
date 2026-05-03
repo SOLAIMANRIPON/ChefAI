@@ -4,6 +4,7 @@ import {
   normalizeDietPreference,
   normalizeSpiceLevel,
 } from '@/constants/recipe-preferences';
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import { loadSavedRecipes } from '@/constants/saved-recipes-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -184,7 +185,16 @@ export default function ExploreScreen() {
             <TouchableOpacity
               key={`${item.query}-${idx}`}
               style={styles.item}
-              onPress={() => router.push({ pathname: '/', params: { ingredient: item.query } })}>
+              onPress={() =>
+                router.push({
+                  pathname: '/craft',
+                  params: {
+                    ingredient: item.query,
+                    selectedLang: item.language,
+                    selectedCuisine: item.cuisine,
+                  },
+                })
+              }>
               <Text style={styles.itemTitle}>{item.query}</Text>
               <Text style={styles.itemMeta}>
                 {item.cuisine} | {item.language}
@@ -193,6 +203,8 @@ export default function ExploreScreen() {
           ))
         )}
       </View>
+
+      <DesignerCreditLine />
     </ScrollView>
     </SafeAreaView>
   );

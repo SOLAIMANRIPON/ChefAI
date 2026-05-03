@@ -1,3 +1,4 @@
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import {
   mergeShoppingItemsToIngredientNames,
@@ -249,6 +250,7 @@ export default function ShoppingListScreen() {
       {!loadingRecipe && !generating && !error && items.length === 0 ? (
         <Text style={styles.empty}>কোনো আইটেম নেই।</Text>
       ) : null}
+      <DesignerCreditLine />
       <HomeExploreNav />
       </View>
     </SafeAreaView>

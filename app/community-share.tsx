@@ -1,6 +1,7 @@
 import { addUserPost } from '@/constants/community-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as ImagePicker from 'expo-image-picker';
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
@@ -142,6 +143,7 @@ export default function CommunityShareScreen() {
             {saving ? t('community.posting') : t('community.postToCommunity')}
           </Text>
         </TouchableOpacity>
+        <DesignerCreditLine />
       </ScrollView>
     </SafeAreaView>
   );

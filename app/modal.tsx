@@ -1,6 +1,7 @@
 import { Link } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
+import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -13,6 +14,7 @@ export default function ModalScreen() {
         <Link href="/" dismissTo style={styles.link}>
           <ThemedText type="link">Go to home screen</ThemedText>
         </Link>
+        <DesignerCreditLine />
       </View>
       <HomeExploreNav />
     </ThemedView>
