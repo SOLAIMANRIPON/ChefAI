@@ -1,50 +1,81 @@
-# Welcome to your Expo app 👋
+# ChefAI
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+ChefAI is an Expo app with a Node.js backend (`server/index.js`) for recipe generation.
 
-## Get started
+## Local development
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+1. Install dependencies:
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+2. Create `.env` from `.env.example` and set real values:
 
-## Learn more
+```env
+EXPO_PUBLIC_API_BASE_URL=http://<your-lan-ip>:3000
+PORT=3000
+GEMINI_API_KEY=your_real_backend_key
+GEMINI_TEXT_MODEL=gemini-3.1-flash-lite-preview
+GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+3. Start backend:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+npm run start:backend
+```
 
-## Join the community
+4. Start Expo app:
 
-Join our community of developers creating universal apps.
+```bash
+npx expo start
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Keep API key private
+
+- Put `GEMINI_API_KEY` only in backend environment variables.
+- Never store real keys in `.env.example`.
+- `.env` is ignored by git, so keep secrets there locally.
+- In the mobile app, use only `EXPO_PUBLIC_API_BASE_URL` (this is not a secret).
+
+## Deploy backend publicly (Render, no domain required)
+
+You can use Render's free URL (for example `https://your-service.onrender.com`) so the app works from any network.
+
+1. Push this repo to GitHub.
+2. On Render, create a new Web Service from your repo.
+3. Render can auto-read `render.yaml` from this project.
+4. In Render dashboard, set secret env var:
+   - `GEMINI_API_KEY=<your real key>`
+5. Deploy and copy your public backend URL.
+6. Set app env locally:
+
+```env
+EXPO_PUBLIC_API_BASE_URL=https://your-service.onrender.com
+```
+
+7. Restart Expo (`npx expo start`) to load the new API URL.
+
+## Build APK with public backend
+
+1. Install and login:
+
+```bash
+npm i -g eas-cli
+eas login
+```
+
+2. Configure EAS once:
+
+```bash
+eas build:configure
+```
+
+3. Build Android APK (internal testing):
+
+```bash
+eas build -p android --profile preview
+```
+
+Before build, make sure `EXPO_PUBLIC_API_BASE_URL` points to your public HTTPS backend.

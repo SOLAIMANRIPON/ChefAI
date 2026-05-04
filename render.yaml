@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: chefai-backend
+    runtime: node
+    plan: free
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npm run start:backend
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PORT
+        value: 3000
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_TEXT_MODEL
+        value: gemini-3.1-flash-lite-preview
+      - key: GEMINI_IMAGE_MODEL
+        value: gemini-2.5-flash-image
