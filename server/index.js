@@ -22,10 +22,28 @@ const normalizeDietPreference = (value) =>
 const normalizeSpiceLevel = (value) =>
   value === 'mild' || value === 'medium' || value === 'hot' ? value : 'medium';
 
+const normalizeDifficultyLevel = (value) =>
+  value === 'easy' || value === 'medium' || value === 'hard' ? value : 'medium';
+
 const coerceCalories = (raw) => {
   if (raw === undefined || raw === null || raw === '') return null;
   const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw).replace(/\D/g, ''), 10);
   if (!Number.isFinite(n) || n < 1 || n > 8000) return null;
+  return n;
+};
+
+const coerceServings = (raw) => {
+  const fallback = 4;
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw).replace(/\D/g, ''), 10);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(n, 20);
+};
+
+const coerceCookTimeMinutes = (raw) => {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw).replace(/\D/g, ''), 10);
+  if (!Number.isFinite(n) || n < 1 || n > 600) return null;
   return n;
 };
 
@@ -380,9 +398,15 @@ app.post('/api/v1/ai/recipes/list', async (req, res) => {
       dietPreference,
       spiceLevel,
       maxCaloriesPerMeal,
+      servings: rawServings,
+      difficultyLevel: rawDifficultyLevel,
+      cookTimeMinutes: rawCookTimeMinutes,
     } = req.body || {};
     const generationMode = normalizeGenerationMode(rawMode);
     const userQuery = String(query || ingredient || '').trim();
+    const servings = coerceServings(rawServings);
+    const difficultyLevel = normalizeDifficultyLevel(rawDifficultyLevel);
+    const cookTimeMinutes = coerceCookTimeMinutes(rawCookTimeMinutes);
 
     if (!userQuery) {
       return res.status(400).json({ message: 'query or ingredient is required' });
@@ -395,9 +419,21 @@ app.post('/api/v1/ai/recipes/list', async (req, res) => {
 
     const nutritionBlock = buildNutritionConstraints({ dietPreference, spiceLevel, maxCaloriesPerMeal });
 
+    const servingsLine = `Serving goal: recipes should work well for approximately ${servings} people (same meal); keep suggested dishes realistic at that scale.`;
+    const difficultyLine =
+      difficultyLevel === 'easy'
+        ? 'Difficulty target: EASY — beginner-friendly, fewer steps, common techniques, low risk of failure.'
+        : difficultyLevel === 'hard'
+          ? 'Difficulty target: HARD — advanced or multi-step recipes are acceptable.'
+          : 'Difficulty target: MEDIUM — approachable home-cooking with some technique but not overly advanced.';
+    const timeLine = cookTimeMinutes != null ? `Time target: prefer recipes that can be completed in about ${cookTimeMinutes} minutes or less.` : '';
+
     const prompt = `You are ChefAI.
 Create exactly 10 ${cuisine} recipe names based on this user input: "${userQuery}".
 The input may be an ingredient name or a dish name.
+${servingsLine}
+${difficultyLine}
+${timeLine}
 ${modeLine}
 ${nutritionBlock ? `User nutrition preferences (you MUST only suggest dishes that can honor these): ${nutritionBlock}` : ''}
 Return only the list in ${language}, one line each.`;
@@ -443,9 +479,15 @@ app.post('/api/v1/ai/recipes/details', async (req, res) => {
       dietPreference,
       spiceLevel,
       maxCaloriesPerMeal,
+      servings: rawServings,
+      difficultyLevel: rawDifficultyLevel,
+      cookTimeMinutes: rawCookTimeMinutes,
     } = req.body || {};
     const generationMode = normalizeGenerationMode(rawMode);
     const userQuery = String(query || ingredient || '').trim();
+    const servings = coerceServings(rawServings);
+    const difficultyLevel = normalizeDifficultyLevel(rawDifficultyLevel);
+    const cookTimeMinutes = coerceCookTimeMinutes(rawCookTimeMinutes);
 
     const modeBlock =
       generationMode === 'creative'
@@ -454,16 +496,36 @@ app.post('/api/v1/ai/recipes/details', async (req, res) => {
 
     const nutritionBlock = buildNutritionConstraints({ dietPreference, spiceLevel, maxCaloriesPerMeal });
 
+    const servingsBlock = `Scale all ingredient amounts for approximately ${servings} servings (${servings} people eating together). Mention approximate yield/servings briefly if helpful.`;
+    const difficultyBlock =
+      difficultyLevel === 'easy'
+        ? 'Keep the recipe EASY: simple workflow, common kitchen tools, minimal prep, beginner-friendly wording.'
+        : difficultyLevel === 'hard'
+          ? 'Keep the recipe HARD: advanced techniques, extra prep, or layered cooking are acceptable if they improve the dish.'
+          : 'Keep the recipe MEDIUM difficulty: practical home-cooking with moderate prep and a few non-trivial steps.';
+    const timeBlock =
+      cookTimeMinutes != null
+        ? `Target total time is about ${cookTimeMinutes} minutes or less including prep where realistic. If needed, favor faster techniques and concise steps.`
+        : '';
+
     const prompt = `Create a complete ${cuisine} recipe in ${language}.
 Recipe target: "${recipeName}".
 User input context (ingredient or dish): "${userQuery}".
+${servingsBlock}
+${difficultyBlock}
+${timeBlock}
 ${modeBlock}
 ${nutritionBlock ? `User nutrition preferences (apply to ingredients, substitutions, and steps): ${nutritionBlock}` : ''}
 Return strict JSON with keys:
 {
   "dishName": "string",
   "recipe": "concise step-by-step instructions with tips",
-  "imagePrompt": "short english food photo query, include dish name and cuisine"
+  "imagePrompt": "short english food photo query, include dish name and cuisine",
+  "nutritionEstimate": {
+    "caloriesKcal": "number or null",
+    "proteinG": "number or null",
+    "carbsG": "number or null"
+  }
 }`;
 
     const text = await generateText(prompt, 35000);
@@ -472,6 +534,7 @@ Return strict JSON with keys:
         dishName: String(recipeName),
         recipe: `1) Prepare ingredients for ${recipeName}.\n2) Cook with medium heat and proper seasoning.\n3) Serve hot.\n\nTip: Adjust spice level based on preference.`,
         imageUrl: buildDishImageUrl(`${recipeName}, food, ${cuisine}`),
+        nutritionEstimate: { caloriesKcal: null, proteinG: null, carbsG: null },
       });
     }
 
@@ -488,6 +551,22 @@ Return strict JSON with keys:
 
     const dishName = typeof parsed.dishName === 'string' ? parsed.dishName : String(recipeName);
     const recipe = typeof parsed.recipe === 'string' ? parsed.recipe : String(text);
+    const parsedNutrition =
+      parsed?.nutritionEstimate && typeof parsed.nutritionEstimate === 'object' ? parsed.nutritionEstimate : {};
+    const nutritionEstimate = {
+      caloriesKcal:
+        typeof parsedNutrition.caloriesKcal === 'number' && Number.isFinite(parsedNutrition.caloriesKcal)
+          ? Math.max(0, Math.round(parsedNutrition.caloriesKcal))
+          : null,
+      proteinG:
+        typeof parsedNutrition.proteinG === 'number' && Number.isFinite(parsedNutrition.proteinG)
+          ? Math.max(0, Math.round(parsedNutrition.proteinG))
+          : null,
+      carbsG:
+        typeof parsedNutrition.carbsG === 'number' && Number.isFinite(parsedNutrition.carbsG)
+          ? Math.max(0, Math.round(parsedNutrition.carbsG))
+          : null,
+    };
     const rawImagePrompt =
       typeof parsed.imagePrompt === 'string' && parsed.imagePrompt.trim()
         ? parsed.imagePrompt.trim()
@@ -504,7 +583,7 @@ Return strict JSON with keys:
         message: 'Gemini image is temporarily unavailable. Please try again in a moment.',
       });
     }
-    return res.json({ dishName, recipe, imageUrl });
+    return res.json({ dishName, recipe, imageUrl, nutritionEstimate });
   } catch (error) {
     console.error('recipes/details failed:', error);
     return res.status(500).json({
@@ -515,15 +594,21 @@ Return strict JSON with keys:
 
 app.post('/api/v1/ai/recipes/shopping-list', async (req, res) => {
   try {
-    const { recipeText = '', dishName = 'Recipe', language = 'বাংলা' } = req.body || {};
+    const { recipeText = '', dishName = 'Recipe', language = 'বাংলা', servings: rawServings } = req.body || {};
     const body = String(recipeText || '').trim();
     if (!body) {
       return res.status(400).json({ message: 'recipeText is required' });
     }
 
+    const servings = coerceServings(rawServings);
+    const servingsHint =
+      servings !== 4
+        ? `The recipe is scaled for about ${servings} people — prefer ingredient quantities consistent with that scale when inferring needs.\n`
+        : '';
+
     const prompt = `You extract a practical grocery shopping list from a recipe.
 Dish: "${String(dishName).slice(0, 200)}"
-Recipe text:
+${servingsHint}Recipe text:
 """
 ${body.slice(0, 12000)}
 """

@@ -1,8 +1,12 @@
 import {
+  type DifficultyLevel,
+  normalizeDifficultyLevel,
   type DietPreference,
   type SpiceLevel,
   normalizeDietPreference,
   normalizeSpiceLevel,
+  parseCookTimeMinutesParam,
+  parseServingsParam,
 } from '@/constants/recipe-preferences';
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
@@ -27,6 +31,9 @@ type SavedRecipe = {
   dietPreference?: DietPreference;
   spiceLevel?: SpiceLevel;
   maxCaloriesPerMeal?: string;
+  servings?: string;
+  difficultyLevel?: DifficultyLevel;
+  cookTimeMinutes?: string;
 };
 
 type RecentView = {
@@ -42,6 +49,9 @@ type RecentSearch = {
   cuisine: string;
   language: string;
   at: string;
+  servings?: string;
+  difficultyLevel?: DifficultyLevel;
+  cookTimeMinutes?: string;
 };
 
 export default function ExploreScreen() {
@@ -95,7 +105,11 @@ export default function ExploreScreen() {
     generationMode: 'strict' | 'creative' = 'strict',
     dietPreference: DietPreference = 'none',
     spiceLevel: SpiceLevel = 'medium',
-    maxCaloriesPerMeal = ''
+    maxCaloriesPerMeal = '',
+    servings = '',
+    difficultyLevel: DifficultyLevel = 'medium',
+    cookTimeMinutes = '',
+    recipeId = ''
   ) => {
     router.push({
       pathname: '/recipe-details',
@@ -108,6 +122,10 @@ export default function ExploreScreen() {
         dietPreference,
         spiceLevel,
         maxCaloriesPerMeal,
+        servings: String(parseServingsParam(servings)),
+        difficultyLevel: normalizeDifficultyLevel(difficultyLevel),
+        cookTimeMinutes: parseCookTimeMinutesParam(cookTimeMinutes) != null ? String(parseCookTimeMinutesParam(cookTimeMinutes)) : '',
+        recipeId,
       },
     });
   };
@@ -152,9 +170,18 @@ export default function ExploreScreen() {
                   item.generationMode === 'creative' ? 'creative' : 'strict',
                   normalizeDietPreference(item.dietPreference),
                   normalizeSpiceLevel(item.spiceLevel),
-                  item.maxCaloriesPerMeal ?? ''
+                  item.maxCaloriesPerMeal ?? '',
+                  item.servings ?? '',
+                  normalizeDifficultyLevel(item.difficultyLevel),
+                  item.cookTimeMinutes ?? '',
+                  item.id
                 )}>
-              <Text style={styles.itemTitle}>{item.dishName}</Text>
+              <View style={styles.itemHeadCol}>
+                <Text style={styles.itemTitle}>{item.dishName}</Text>
+                <View style={styles.offlineBadge}>
+                  <Text style={styles.offlineBadgeText}>Offline available</Text>
+                </View>
+              </View>
               <Text style={styles.itemMeta}>
                 {item.cuisine || t('explore.cuisine')} | {item.language || t('explore.language')}
               </Text>
@@ -192,6 +219,9 @@ export default function ExploreScreen() {
                     ingredient: item.query,
                     selectedLang: item.language,
                     selectedCuisine: item.cuisine,
+                    servings: item.servings ?? '',
+                    difficultyLevel: normalizeDifficultyLevel(item.difficultyLevel),
+                    cookTimeMinutes: item.cookTimeMinutes ?? '',
                   },
                 })
               }>
@@ -245,7 +275,18 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: '#d3b275', fontSize: 18, fontWeight: '700', marginBottom: 10 },
   item: { borderTopWidth: 1, borderTopColor: '#222', paddingVertical: 10 },
+  itemHeadCol: { gap: 6 },
   itemTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   itemMeta: { color: '#8f8f8f', fontSize: 12, marginTop: 4 },
+  offlineBadge: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#2f3f2f',
+    backgroundColor: '#0f1b0f',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  offlineBadgeText: { color: '#9fca9f', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
   emptyText: { color: '#8f8f8f', fontSize: 13, paddingVertical: 6 },
 });

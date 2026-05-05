@@ -5,6 +5,7 @@ import {
   normalizeShoppingIngredientLabels,
 } from '@/constants/shopping-ingredient-label';
 import { extractShoppingItemsFromRecipeText } from '@/constants/shopping-list-fallback';
+import { parseServingsParam } from '@/constants/recipe-preferences';
 import { getSavedRecipeById } from '@/constants/saved-recipes-storage';
 import {
   getShoppingList,
@@ -45,7 +46,8 @@ const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs: nu
 async function fetchShoppingItemsFromApi(
   recipeText: string,
   dishName: string,
-  language: string
+  language: string,
+  servings: number
 ): Promise<string[]> {
   if (!API_BASE_URL) return [];
   try {
@@ -58,6 +60,7 @@ async function fetchShoppingItemsFromApi(
           recipeText,
           dishName,
           language,
+          servings,
         }),
       },
       45000
@@ -85,6 +88,7 @@ export default function ShoppingListScreen() {
   const [recipeBody, setRecipeBody] = React.useState('');
   const [language, setLanguage] = React.useState('বাংলা');
   const [fallbackNote, setFallbackNote] = React.useState(false);
+  const [recipeServings, setRecipeServings] = React.useState(4);
 
   const reloadFromStorage = React.useCallback(async (rid: string, name: string) => {
     const stored = await getShoppingList(rid);
@@ -98,12 +102,18 @@ export default function ShoppingListScreen() {
     return false;
   }, []);
 
-  const generateAndStore = React.useCallback(async (rid: string, name: string, body: string, lang: string) => {
+  const generateAndStore = React.useCallback(async (
+    rid: string,
+    name: string,
+    body: string,
+    lang: string,
+    servings: number
+  ) => {
     setGenerating(true);
     setError('');
     setFallbackNote(false);
     try {
-      const apiLabels = await fetchShoppingItemsFromApi(body, name, lang);
+      const apiLabels = await fetchShoppingItemsFromApi(body, name, lang, servings);
       const localLabels = extractShoppingItemsFromRecipeText(body);
       const mergedRaw = apiLabels.length > 0 ? apiLabels : localLabels;
       const labels = normalizeShoppingIngredientLabels(mergedRaw);
@@ -148,6 +158,7 @@ export default function ShoppingListScreen() {
         setDishName(name);
         setRecipeBody(recipe.recipe);
         setLanguage(recipe.language || 'বাংলা');
+        setRecipeServings(parseServingsParam(recipe.servings));
 
         const hasStored = await reloadFromStorage(recipeId, name);
         if (cancelled) return;
@@ -164,7 +175,7 @@ export default function ShoppingListScreen() {
         }
 
         setLoadingRecipe(false);
-        await generateAndStore(recipeId, name, recipe.recipe, recipe.language || 'বাংলা');
+        await generateAndStore(recipeId, name, recipe.recipe, recipe.language || 'বাংলা', parseServingsParam(recipe.servings));
       } catch {
         if (!cancelled) setError('লোড করা যায়নি।');
         if (!cancelled) setLoadingRecipe(false);
@@ -188,7 +199,7 @@ export default function ShoppingListScreen() {
       setError('রেসিপি টেক্সট নেই।');
       return;
     }
-    void generateAndStore(recipeId, dishName, recipeBody, language);
+    void generateAndStore(recipeId, dishName, recipeBody, language, recipeServings);
   };
 
   const remaining = items.filter((x) => !x.checked).length;

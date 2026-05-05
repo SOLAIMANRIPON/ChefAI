@@ -24,9 +24,13 @@ import {
 } from '@/constants/diet-input-conflict';
 import { languageAliasByCountry } from '@/constants/language-alias';
 import {
+  type DifficultyLevel,
   type DietPreference,
   type SpiceLevel,
+  normalizeDifficultyLevel,
+  parseCookTimeMinutesParam,
   parseMaxCaloriesParam,
+  parseServingsParam,
 } from '@/constants/recipe-preferences';
 
 const DAILY_FREE_LIMIT = 5;
@@ -182,6 +186,17 @@ const dietSpiceUi = {
     spiceHot: 'ঝাল',
     caloriesSectionLabel: 'সর্বোচ্চ ক্যালরি / বেলা (ঐচ্ছিক)',
     caloriesPlaceholder: 'যেমন ৬০০ — খালি রাখলে লিমিট নেই',
+    servingsSectionLabel: 'কত জনের জন্য (পোর্শন)',
+    servingsPlaceholder: 'যেমন ৪ — খালি থাকলে ৪ ধরা হবে (সর্বোচ্চ ২০)',
+    difficultySectionLabel: 'রান্নার কঠিনতা',
+    difficultyEasy: 'সহজ',
+    difficultyMedium: 'মাঝারি',
+    difficultyHard: 'কঠিন',
+    timeSectionLabel: 'সময়ের ফিল্টার',
+    time15: '১৫ মিনিট',
+    time30: '৩০ মিনিট',
+    time45: '৪৫ মিনিট',
+    time60: '৬০ মিনিট',
   },
   English: {
     dietSectionLabel: 'Diet',
@@ -195,6 +210,17 @@ const dietSpiceUi = {
     spiceHot: 'Hot',
     caloriesSectionLabel: 'Max kcal per meal (optional)',
     caloriesPlaceholder: 'e.g. 600 — empty = no limit',
+    servingsSectionLabel: 'Servings (people)',
+    servingsPlaceholder: 'e.g. 4 — empty defaults to 4 (max 20)',
+    difficultySectionLabel: 'Recipe difficulty',
+    difficultyEasy: 'Easy',
+    difficultyMedium: 'Medium',
+    difficultyHard: 'Hard',
+    timeSectionLabel: 'Time filter',
+    time15: '15 min',
+    time30: '30 min',
+    time45: '45 min',
+    time60: '60 min',
   },
 } as const;
 
@@ -248,6 +274,9 @@ function dietConflictMessage(
 export default function CraftScreen() {
   const params = useLocalSearchParams<{
     ingredient?: string;
+    servings?: string | string[];
+    difficultyLevel?: string | string[];
+    cookTimeMinutes?: string | string[];
     selectedLang?: string | string[];
     selectedCuisine?: string | string[];
   }>();
@@ -261,7 +290,10 @@ export default function CraftScreen() {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('strict');
   const [dietPreference, setDietPreference] = useState<DietPreference>('none');
   const [spiceLevel, setSpiceLevel] = useState<SpiceLevel>('medium');
+  const [difficultyLevel, setDifficultyLevel] = useState<DifficultyLevel>('medium');
+  const [cookTimeMinutes, setCookTimeMinutes] = useState<number | null>(30);
   const [maxCaloriesInput, setMaxCaloriesInput] = useState('');
+  const [servingsInput, setServingsInput] = useState('4');
 
   const [freeUsedToday, setFreeUsedToday] = useState(0);
   const [recognizingIngredients, setRecognizingIngredients] = useState(false);
@@ -334,9 +366,15 @@ export default function CraftScreen() {
   React.useEffect(() => {
     const lang = paramString(params.selectedLang);
     const cuisine = paramString(params.selectedCuisine);
+    const servingsParam = paramString(params.servings);
+    const difficultyParam = paramString(params.difficultyLevel);
+    const cookTimeParam = paramString(params.cookTimeMinutes);
     if (lang) setSelectedLang(lang);
     if (cuisine) setSelectedCuisine(cuisine);
-  }, [params.selectedLang, params.selectedCuisine]);
+    if (servingsParam) setServingsInput(String(parseServingsParam(servingsParam)));
+    if (difficultyParam) setDifficultyLevel(normalizeDifficultyLevel(difficultyParam));
+    if (cookTimeParam) setCookTimeMinutes(parseCookTimeMinutesParam(cookTimeParam));
+  }, [params.selectedLang, params.selectedCuisine, params.servings, params.difficultyLevel, params.cookTimeMinutes]);
 
   const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs = 25000) => {
     const controller = new AbortController();
@@ -448,6 +486,7 @@ export default function CraftScreen() {
     }
 
     const maxCaloriesPerMeal = parseMaxCaloriesParam(maxCaloriesInput.trim());
+    const servings = parseServingsParam(servingsInput.trim());
 
     const response = await fetchWithTimeout(
       `${API_BASE_URL}/api/v1/ai/recipes/list`,
@@ -462,6 +501,9 @@ export default function CraftScreen() {
           generationMode,
           dietPreference: effectiveDiet,
           spiceLevel,
+          servings,
+          difficultyLevel,
+          ...(cookTimeMinutes != null ? { cookTimeMinutes } : {}),
           ...(maxCaloriesPerMeal != null ? { maxCaloriesPerMeal } : {}),
         }),
       },
@@ -497,10 +539,14 @@ export default function CraftScreen() {
             dietPreference?: DietPreference;
             spiceLevel?: SpiceLevel;
             maxCaloriesPerMeal?: string;
+            servings?: string;
+            difficultyLevel?: DifficultyLevel;
+            cookTimeMinutes?: string;
             at: string;
           }[])
         : [];
       const maxCaloriesPerMeal = parseMaxCaloriesParam(maxCaloriesInput.trim());
+      const servings = parseServingsParam(servingsInput.trim());
       const nextItem = {
         query,
         cuisine: selectedCuisine,
@@ -509,6 +555,9 @@ export default function CraftScreen() {
         dietPreference: effectiveDiet,
         spiceLevel,
         maxCaloriesPerMeal: maxCaloriesPerMeal != null ? String(maxCaloriesPerMeal) : '',
+        servings: String(servings),
+        difficultyLevel,
+        cookTimeMinutes: cookTimeMinutes != null ? String(cookTimeMinutes) : '',
         at: new Date().toISOString(),
       };
       const uniqueItems = [nextItem, ...previous.filter((item) => item.query !== query)];
@@ -525,6 +574,7 @@ export default function CraftScreen() {
       const recipeNames = await fetchRecipeNamesFromBackend(effectiveDiet);
       await saveRecentSearch(ingredient.trim(), effectiveDiet);
       const maxCaloriesPerMeal = parseMaxCaloriesParam(maxCaloriesInput.trim());
+      const servings = parseServingsParam(servingsInput.trim());
       router.push({
         pathname: '/recipe-list',
         params: {
@@ -536,6 +586,9 @@ export default function CraftScreen() {
           dietPreference: effectiveDiet,
           spiceLevel,
           maxCaloriesPerMeal: maxCaloriesPerMeal != null ? String(maxCaloriesPerMeal) : '',
+          servings: String(servings),
+          difficultyLevel,
+          cookTimeMinutes: cookTimeMinutes != null ? String(cookTimeMinutes) : '',
         },
       });
       await consumeFreeUsage();
@@ -665,6 +718,41 @@ export default function CraftScreen() {
               </TouchableOpacity>
             ))}
           </View>
+          <Text style={[styles.prefSectionLabel, styles.prefSectionSpaced]}>{dsUi.difficultySectionLabel}</Text>
+          <View style={styles.modeToggleRow}>
+            {(
+              [
+                ['easy', dsUi.difficultyEasy],
+                ['medium', dsUi.difficultyMedium],
+                ['hard', dsUi.difficultyHard],
+              ] as const
+            ).map(([value, label]) => (
+              <TouchableOpacity
+                key={value}
+                style={[styles.modeBtn, difficultyLevel === value && styles.modeBtnActive]}
+                onPress={() => setDifficultyLevel(value)}>
+                <Text style={[styles.modeBtnText, difficultyLevel === value && styles.modeBtnTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={[styles.prefSectionLabel, styles.prefSectionSpaced]}>{dsUi.timeSectionLabel}</Text>
+          <View style={styles.timeGrid}>
+            {(
+              [
+                [15, dsUi.time15],
+                [30, dsUi.time30],
+                [45, dsUi.time45],
+                [60, dsUi.time60],
+              ] as const
+            ).map(([value, label]) => (
+              <TouchableOpacity
+                key={value}
+                style={[styles.timeBtn, cookTimeMinutes === value && styles.modeBtnActive]}
+                onPress={() => setCookTimeMinutes(value)}>
+                <Text style={[styles.modeBtnText, cookTimeMinutes === value && styles.modeBtnTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <Text style={[styles.prefSectionLabel, styles.prefSectionSpaced]}>{dsUi.caloriesSectionLabel}</Text>
           <TextInput
             style={styles.caloriesInput}
@@ -672,6 +760,15 @@ export default function CraftScreen() {
             placeholderTextColor="#555"
             value={maxCaloriesInput}
             onChangeText={setMaxCaloriesInput}
+            keyboardType="number-pad"
+          />
+          <Text style={[styles.prefSectionLabel, styles.prefSectionSpaced]}>{dsUi.servingsSectionLabel}</Text>
+          <TextInput
+            style={styles.caloriesInput}
+            placeholder={dsUi.servingsPlaceholder}
+            placeholderTextColor="#555"
+            value={servingsInput}
+            onChangeText={setServingsInput}
             keyboardType="number-pad"
           />
         </View>
@@ -758,6 +855,8 @@ const styles = StyleSheet.create({
   prefCard: { width: '100%', marginBottom: 20 },
   prefSectionLabel: { color: '#666', fontSize: 10, textTransform: 'uppercase', marginBottom: 8, letterSpacing: 1.2 },
   prefSectionSpaced: { marginTop: 14 },
+  timeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 },
+  timeBtn: { width: '48%' },
   dietGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   prefChip: {
     width: '48%',

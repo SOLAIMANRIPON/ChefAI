@@ -3,11 +3,14 @@ import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/h
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import { getSaveRecipeAlerts } from '@/constants/save-recipe-alerts';
 import {
+  normalizeDifficultyLevel,
   normalizeDietPreference,
   normalizeSpiceLevel,
+  parseCookTimeMinutesParam,
   parseMaxCaloriesParam,
+  parseServingsParam,
 } from '@/constants/recipe-preferences';
-import { makeShortRecipeId, upsertSavedRecipe, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
+import { getSavedRecipeById, makeShortRecipeId, upsertSavedRecipe, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -26,7 +29,9 @@ import {
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
 // Locked timeout/retry policy for production stability.
-const recipeDetailsCache: Record<string, { dishName: string; recipe: string; imageUrl: string }> = {};
+type NutritionEstimate = { caloriesKcal: number | null; proteinG: number | null; carbsG: number | null };
+const EMPTY_NUTRITION: NutritionEstimate = { caloriesKcal: null, proteinG: null, carbsG: null };
+const recipeDetailsCache: Record<string, { dishName: string; recipe: string; imageUrl: string; nutrition: NutritionEstimate }> = {};
 
 const isAbortError = (error: unknown) =>
   error instanceof Error && error.name === 'AbortError';
@@ -68,6 +73,10 @@ export default function RecipeDetailsScreen() {
     dietPreference?: string;
     spiceLevel?: string;
     maxCaloriesPerMeal?: string;
+    servings?: string;
+    difficultyLevel?: string;
+    cookTimeMinutes?: string;
+    recipeId?: string;
   }>();
 
   const recipeName = params.recipeName ?? 'Recipe';
@@ -79,6 +88,10 @@ export default function RecipeDetailsScreen() {
   const dietPreference = normalizeDietPreference(params.dietPreference);
   const spiceLevel = normalizeSpiceLevel(params.spiceLevel);
   const maxCaloriesPerMeal = parseMaxCaloriesParam(params.maxCaloriesPerMeal);
+  const servings = parseServingsParam(params.servings);
+  const difficultyLevel = normalizeDifficultyLevel(params.difficultyLevel);
+  const cookTimeMinutes = parseCookTimeMinutesParam(params.cookTimeMinutes);
+  const recipeId = typeof params.recipeId === 'string' ? params.recipeId.trim() : '';
 
   const [dishName, setDishName] = useState(recipeName);
   const [recipe, setRecipe] = useState('');
@@ -88,6 +101,7 @@ export default function RecipeDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [nutrition, setNutrition] = useState<NutritionEstimate>(EMPTY_NUTRITION);
 
   const saveRecentView = useCallback(async (name: string) => {
     try {
@@ -126,6 +140,12 @@ export default function RecipeDetailsScreen() {
         dietPreference,
         spiceLevel,
         maxCaloriesPerMeal: maxCaloriesPerMeal != null ? String(maxCaloriesPerMeal) : '',
+        servings: String(servings),
+        difficultyLevel,
+        cookTimeMinutes: cookTimeMinutes != null ? String(cookTimeMinutes) : '',
+        nutritionCaloriesKcal: nutrition.caloriesKcal != null ? String(nutrition.caloriesKcal) : '',
+        nutritionProteinG: nutrition.proteinG != null ? String(nutrition.proteinG) : '',
+        nutritionCarbsG: nutrition.carbsG != null ? String(nutrition.carbsG) : '',
         savedAt: new Date().toISOString(),
       };
       await upsertSavedRecipe(nextItem);
@@ -165,7 +185,10 @@ export default function RecipeDetailsScreen() {
             generationMode,
             dietPreference,
             spiceLevel,
+            difficultyLevel,
+            ...(cookTimeMinutes != null ? { cookTimeMinutes } : {}),
             ...(maxCaloriesPerMeal != null ? { maxCaloriesPerMeal } : {}),
+            servings,
           }),
         },
         70000
@@ -192,9 +215,19 @@ export default function RecipeDetailsScreen() {
     const name = typeof data?.dishName === 'string' && data.dishName.trim() ? data.dishName.trim() : recipeName;
     const instructions = typeof data?.recipe === 'string' ? cleanRecipeText(data.recipe) : '';
     const generatedImageUrl = typeof data?.imageUrl === 'string' ? data.imageUrl : '';
+    const nutritionEstimate = data?.nutritionEstimate && typeof data.nutritionEstimate === 'object'
+      ? {
+          caloriesKcal:
+            typeof data.nutritionEstimate.caloriesKcal === 'number' ? Math.max(0, Math.round(data.nutritionEstimate.caloriesKcal)) : null,
+          proteinG:
+            typeof data.nutritionEstimate.proteinG === 'number' ? Math.max(0, Math.round(data.nutritionEstimate.proteinG)) : null,
+          carbsG:
+            typeof data.nutritionEstimate.carbsG === 'number' ? Math.max(0, Math.round(data.nutritionEstimate.carbsG)) : null,
+        }
+      : EMPTY_NUTRITION;
 
     if (!instructions) throw new Error('No recipe details returned from backend');
-    return { name, instructions, generatedImageUrl };
+    return { name, instructions, generatedImageUrl, nutritionEstimate };
   }, [
     recipeName,
     ingredient,
@@ -204,30 +237,51 @@ export default function RecipeDetailsScreen() {
     dietPreference,
     spiceLevel,
     maxCaloriesPerMeal,
+    servings,
+    difficultyLevel,
+    cookTimeMinutes,
   ]);
 
   useEffect(() => {
     const loadRecipe = async () => {
-      const cacheKey = `${generationMode}__${dietPreference}__${spiceLevel}__${maxCaloriesPerMeal ?? ''}__${selectedCuisine}__${selectedLang}__${ingredient.trim().toLowerCase()}__${recipeName}`;
+      const cacheKey = `${generationMode}__${dietPreference}__${spiceLevel}__${difficultyLevel}__${cookTimeMinutes ?? ''}__${maxCaloriesPerMeal ?? ''}__${servings}__${selectedCuisine}__${selectedLang}__${ingredient.trim().toLowerCase()}__${recipeName}`;
 
       setLoading(true);
       setErrorMessage('');
       setRecipe('');
       setImageUrl('');
+      setNutrition(EMPTY_NUTRITION);
       setImageError(false);
       setImageFallbackTried(false);
 
       try {
-        const { name, instructions, generatedImageUrl } = await fetchRecipeDetailsFromBackend();
+        if (recipeId) {
+          const localSaved = await getSavedRecipeById(recipeId);
+          if (localSaved?.recipe?.trim()) {
+            setDishName(localSaved.dishName || recipeName);
+            setRecipe(localSaved.recipe);
+            setImageUrl(localSaved.imageUrl || '');
+            setNutrition({
+              caloriesKcal: localSaved.nutritionCaloriesKcal ? Number.parseInt(localSaved.nutritionCaloriesKcal, 10) || null : null,
+              proteinG: localSaved.nutritionProteinG ? Number.parseInt(localSaved.nutritionProteinG, 10) || null : null,
+              carbsG: localSaved.nutritionCarbsG ? Number.parseInt(localSaved.nutritionCarbsG, 10) || null : null,
+            });
+            return;
+          }
+        }
+
+        const { name, instructions, generatedImageUrl, nutritionEstimate } = await fetchRecipeDetailsFromBackend();
 
         setDishName(name);
         setRecipe(instructions);
         setImageUrl(generatedImageUrl);
+        setNutrition(nutritionEstimate);
         await saveRecentView(name);
         recipeDetailsCache[cacheKey] = {
           dishName: name,
           recipe: instructions,
           imageUrl: generatedImageUrl,
+          nutrition: nutritionEstimate,
         };
       } catch (error) {
         console.error(error);
@@ -251,6 +305,10 @@ export default function RecipeDetailsScreen() {
     dietPreference,
     spiceLevel,
     maxCaloriesPerMeal,
+    servings,
+    difficultyLevel,
+    cookTimeMinutes,
+    recipeId,
     fetchRecipeDetailsFromBackend,
     saveRecentView,
   ]);
@@ -270,6 +328,9 @@ export default function RecipeDetailsScreen() {
           {'  |  '}
           Diet: {dietPreference}  |  Spice: {spiceLevel}
           {maxCaloriesPerMeal != null ? `  |  Max kcal: ${maxCaloriesPerMeal}` : ''}
+          {`  |  Servings: ${servings}`}
+          {`  |  Difficulty: ${difficultyLevel}`}
+          {cookTimeMinutes != null ? `  |  Time: ${cookTimeMinutes} min` : ''}
         </Text>
         <TouchableOpacity style={styles.saveButton} onPress={saveRecipe} disabled={saving || loading || !recipe}>
           <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
@@ -304,6 +365,16 @@ export default function RecipeDetailsScreen() {
             ) : null}
             {dishName ? <Text style={styles.dishTitle}>{dishName}</Text> : null}
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+            {(nutrition.caloriesKcal != null || nutrition.proteinG != null || nutrition.carbsG != null) ? (
+              <View style={styles.nutritionCard}>
+                <Text style={styles.nutritionTitle}>Estimated Nutrition (approx.)</Text>
+                <Text style={styles.nutritionLine}>
+                  Calories: {nutrition.caloriesKcal != null ? `${nutrition.caloriesKcal} kcal` : 'N/A'}  |  Protein:{' '}
+                  {nutrition.proteinG != null ? `${nutrition.proteinG} g` : 'N/A'}  |  Carbs:{' '}
+                  {nutrition.carbsG != null ? `${nutrition.carbsG} g` : 'N/A'}
+                </Text>
+              </View>
+            ) : null}
             {recipe ? (
               <View style={styles.recipeCard}>
                 <Text style={styles.recipeText}>{recipe}</Text>
@@ -366,6 +437,17 @@ const styles = StyleSheet.create({
   },
   recipeCard: { width: '100%', backgroundColor: '#111', padding: 25, borderRadius: 20, marginBottom: 20 },
   recipeText: { color: '#ddd', fontSize: 16, lineHeight: 26 },
+  nutritionCard: {
+    width: '100%',
+    backgroundColor: '#121212',
+    borderWidth: 1,
+    borderColor: '#2e2e2e',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+  },
+  nutritionTitle: { color: '#d3b275', fontSize: 13, fontWeight: '700', marginBottom: 6 },
+  nutritionLine: { color: '#cfcfcf', fontSize: 13, lineHeight: 20 },
   errorText: { color: '#ff7f7f', fontSize: 14, marginBottom: 14, textAlign: 'center' },
   imageFallback: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' },
   imageFallbackText: { color: '#d3b275', fontSize: 16, textAlign: 'center' },

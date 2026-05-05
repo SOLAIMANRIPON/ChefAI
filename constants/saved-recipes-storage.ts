@@ -41,6 +41,12 @@ export type StoredSavedRecipe = {
   dietPreference?: string;
   spiceLevel?: string;
   maxCaloriesPerMeal?: string;
+  servings?: string;
+  difficultyLevel?: string;
+  cookTimeMinutes?: string;
+  nutritionCaloriesKcal?: string;
+  nutritionProteinG?: string;
+  nutritionCarbsG?: string;
   savedAt: string;
 };
 
@@ -68,6 +74,12 @@ function narrowMetaFields(rest: Omit<StoredSavedRecipe, 'recipe'>): Omit<StoredS
     dietPreference: clip(rest.dietPreference, MAX_MISC_STRING_LEN),
     spiceLevel: clip(rest.spiceLevel, MAX_MISC_STRING_LEN),
     maxCaloriesPerMeal: clip(rest.maxCaloriesPerMeal, MAX_MISC_STRING_LEN),
+    servings: clip(rest.servings, MAX_MISC_STRING_LEN),
+    difficultyLevel: clip(rest.difficultyLevel, MAX_MISC_STRING_LEN),
+    cookTimeMinutes: clip(rest.cookTimeMinutes, MAX_MISC_STRING_LEN),
+    nutritionCaloriesKcal: clip(rest.nutritionCaloriesKcal, MAX_MISC_STRING_LEN),
+    nutritionProteinG: clip(rest.nutritionProteinG, MAX_MISC_STRING_LEN),
+    nutritionCarbsG: clip(rest.nutritionCarbsG, MAX_MISC_STRING_LEN),
     savedAt: rest.savedAt.slice(0, MAX_MISC_STRING_LEN),
   };
 }

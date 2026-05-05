@@ -2,8 +2,11 @@ import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import {
+  normalizeDifficultyLevel,
   normalizeDietPreference,
   normalizeSpiceLevel,
+  parseCookTimeMinutesParam,
+  parseServingsParam,
 } from '@/constants/recipe-preferences';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
@@ -19,6 +22,9 @@ export default function RecipeListScreen() {
     dietPreference?: string;
     spiceLevel?: string;
     maxCaloriesPerMeal?: string;
+    servings?: string;
+    difficultyLevel?: string;
+    cookTimeMinutes?: string;
   }>();
 
   const ingredient = params.ingredient ?? '';
@@ -29,6 +35,9 @@ export default function RecipeListScreen() {
   const dietPreference = normalizeDietPreference(params.dietPreference);
   const spiceLevel = normalizeSpiceLevel(params.spiceLevel);
   const maxCaloriesPerMeal = params.maxCaloriesPerMeal?.trim() ?? '';
+  const servings = parseServingsParam(params.servings);
+  const difficultyLevel = normalizeDifficultyLevel(params.difficultyLevel);
+  const cookTimeMinutes = parseCookTimeMinutesParam(params.cookTimeMinutes);
   const [selectedRecipeLoading, setSelectedRecipeLoading] = useState<string | null>(null);
 
   const recipes = useMemo(() => {
@@ -53,6 +62,9 @@ export default function RecipeListScreen() {
         dietPreference,
         spiceLevel,
         maxCaloriesPerMeal,
+        servings: String(servings),
+        difficultyLevel,
+        cookTimeMinutes: cookTimeMinutes != null ? String(cookTimeMinutes) : '',
       },
     });
     setTimeout(() => setSelectedRecipeLoading(null), 600);
@@ -73,6 +85,9 @@ export default function RecipeListScreen() {
           {'  |  '}
           Diet: {dietPreference}  |  Spice: {spiceLevel}
           {maxCaloriesPerMeal ? `  |  Max kcal: ${maxCaloriesPerMeal}` : ''}
+          {`  |  Servings: ${servings}`}
+          {`  |  Difficulty: ${difficultyLevel}`}
+          {cookTimeMinutes != null ? `  |  Time: ${cookTimeMinutes} min` : ''}
         </Text>
 
         <View style={styles.recipeListCard}>
