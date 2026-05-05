@@ -12,7 +12,7 @@ const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3.1-flash-li
 const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image').trim();
 
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '6mb' }));
 
 const normalizeGenerationMode = (mode) => (mode === 'creative' ? 'creative' : 'strict');
 
@@ -176,6 +176,44 @@ async function generateText(prompt, timeoutMs = 30000) {
   }
 
   return null;
+}
+
+async function generateTextFromImage({ prompt, base64Data, mimeType = 'image/jpeg' }, timeoutMs = 30000) {
+  if (!GEMINI_API_KEY) return null;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    GEMINI_TEXT_MODEL
+  )}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Gemini image-text timeout')), timeoutMs);
+  });
+
+  const request = fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType,
+                data: base64Data,
+              },
+            },
+          ],
+        },
+      ],
+    }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(`Gemini image-text failed (${response.status})`);
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.find((part) => typeof part?.text === 'string')?.text;
+    return typeof text === 'string' && text.trim() ? text : null;
+  });
+
+  return Promise.race([request, timeout]);
 }
 
 const IMAGE_PROMPT_GLOBAL_SUFFIX =
@@ -504,6 +542,45 @@ Return ONLY a JSON array of strings. Each string is ONE ingredient NAME only for
     console.error('recipes/shopping-list failed:', error);
     return res.status(500).json({
       message: error instanceof Error ? error.message : 'Failed to generate shopping list',
+    });
+  }
+});
+
+app.post('/api/v1/ai/ingredients/recognize', async (req, res) => {
+  try {
+    const { imageBase64 = '', language = 'বাংলা' } = req.body || {};
+    const rawImage = String(imageBase64 || '').trim();
+    if (!rawImage) {
+      return res.status(400).json({ message: 'imageBase64 is required' });
+    }
+
+    const dataUrlMatch = rawImage.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    const mimeType = dataUrlMatch?.[1] || 'image/jpeg';
+    const base64Data = (dataUrlMatch?.[2] || rawImage).replace(/\s+/g, '');
+
+    if (!base64Data || base64Data.length < 120) {
+      return res.status(400).json({ message: 'imageBase64 is invalid' });
+    }
+
+    const prompt = `You are an ingredient recognizer for cooking.
+Look at the provided food/ingredient image and list likely raw ingredients visible in the image.
+Rules:
+- Return ONLY a JSON array of strings.
+- Each item must be a short ingredient name (no quantity, no brand, no sentence).
+- Max 20 items.
+- If confidence is low, return fewer items.
+- Use language: ${language}.`;
+
+    const text = await generateTextFromImage({ prompt, base64Data, mimeType }, 30000);
+    const items = parseStringArrayJson(text || '').slice(0, 20);
+    if (!items.length) {
+      return res.status(502).json({ message: 'Could not recognize ingredients from image' });
+    }
+    return res.json({ ingredients: items });
+  } catch (error) {
+    console.error('ingredients/recognize failed:', error);
+    return res.status(500).json({
+      message: error instanceof Error ? error.message : 'Failed to recognize ingredients',
     });
   }
 });

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -263,6 +264,7 @@ export default function CraftScreen() {
   const [maxCaloriesInput, setMaxCaloriesInput] = useState('');
 
   const [freeUsedToday, setFreeUsedToday] = useState(0);
+  const [recognizingIngredients, setRecognizingIngredients] = useState(false);
   const resolvedLanguage = languageAliasByCountry[selectedLang] ?? selectedLang;
   const uiText = uiTranslations[resolvedLanguage] ?? uiTranslations['English'];
   const dsUi = dietSpiceUi[resolvedLanguage as keyof typeof dietSpiceUi] ?? dietSpiceUi.English;
@@ -348,6 +350,97 @@ export default function CraftScreen() {
 
   const isAbortError = (error: unknown) =>
     error instanceof Error && error.name === 'AbortError';
+
+  const detectIngredientsFromBase64 = async (base64: string, mimeType: string) => {
+    if (!API_BASE_URL) {
+      setErrorMessage('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
+      return;
+    }
+
+    setRecognizingIngredients(true);
+    setErrorMessage('');
+    try {
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/api/v1/ai/ingredients/recognize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: `data:${mimeType};base64,${base64}`,
+            language: selectedLang,
+          }),
+        },
+        45000
+      );
+
+      if (!response.ok) {
+        let message = `Backend request failed (${response.status})`;
+        try {
+          const errorJson = await response.json();
+          if (typeof errorJson?.message === 'string') message = errorJson.message;
+        } catch {
+          // Ignore parsing error for non-json responses.
+        }
+        throw new Error(message);
+      }
+
+      const data = await response.json();
+      const ingredients = Array.isArray(data?.ingredients)
+        ? data.ingredients.filter((x: unknown) => typeof x === 'string').map((x: string) => x.trim()).filter(Boolean)
+        : [];
+      if (!ingredients.length) {
+        throw new Error('No ingredients recognized from image');
+      }
+      setIngredient(ingredients.slice(0, 12).join(', '));
+    } catch (error: unknown) {
+      if (isAbortError(error)) {
+        setErrorMessage('Image recognition timed out. Please try again.');
+      } else if (error instanceof Error) {
+        setErrorMessage(error.message);
+      } else {
+        setErrorMessage('ছবি থেকে উপকরণ শনাক্ত করা যায়নি। আবার চেষ্টা করুন।');
+      }
+    } finally {
+      setRecognizingIngredients(false);
+    }
+  };
+
+  const recognizeIngredientsFromImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Please allow photo library access to scan ingredients.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.45,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets[0]?.base64) return;
+    const mimeType = result.assets[0].mimeType || 'image/jpeg';
+    await detectIngredientsFromBase64(result.assets[0].base64, mimeType);
+  };
+
+  const recognizeIngredientsFromCamera = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Please allow camera access to scan ingredients.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.45,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets[0]?.base64) return;
+    const mimeType = result.assets[0].mimeType || 'image/jpeg';
+    await detectIngredientsFromBase64(result.assets[0].base64, mimeType);
+  };
 
   const fetchRecipeNamesFromBackend = async (effectiveDiet: DietPreference) => {
     if (!API_BASE_URL) {
@@ -594,7 +687,29 @@ export default function CraftScreen() {
             value={ingredient}
             onChangeText={setIngredient}
           />
-          <TouchableOpacity style={styles.button} onPress={handleStartCooking} disabled={loading}>
+          <View style={styles.scanRow}>
+            <TouchableOpacity
+              style={[styles.scanButton, recognizingIngredients && styles.scanButtonDisabled]}
+              onPress={recognizeIngredientsFromCamera}
+              disabled={recognizingIngredients || loading}>
+              {recognizingIngredients ? (
+                <ActivityIndicator color="#d3b275" />
+              ) : (
+                <Text style={styles.scanButtonText}>TAKE PHOTO</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.scanButton, recognizingIngredients && styles.scanButtonDisabled]}
+              onPress={recognizeIngredientsFromImage}
+              disabled={recognizingIngredients || loading}>
+              {recognizingIngredients ? (
+                <ActivityIndicator color="#d3b275" />
+              ) : (
+                <Text style={styles.scanButtonText}>PICK FROM GALLERY</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={styles.button} onPress={handleStartCooking} disabled={loading || recognizingIngredients}>
             {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.buttonText}>CRAFT RECIPE</Text>}
           </TouchableOpacity>
           {__DEV__ ? (
@@ -672,6 +787,24 @@ const styles = StyleSheet.create({
   input: { color: '#fff', fontSize: 16, borderBottomWidth: 1, borderBottomColor: '#333', paddingVertical: 12, marginBottom: 25 },
   button: { backgroundColor: '#d3b275', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   buttonText: { color: '#000', fontSize: 18, fontWeight: 'bold', letterSpacing: 1.2 },
+  scanRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  scanButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#444',
+    backgroundColor: '#0f0f0f',
+    minHeight: 56,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanButtonDisabled: { opacity: 0.65 },
+  scanButtonText: { color: '#d3b275', fontSize: 13, fontWeight: '700', letterSpacing: 1, textAlign: 'center' },
   devResetBtn: {
     marginTop: 10,
     paddingVertical: 10,
