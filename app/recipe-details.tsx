@@ -10,7 +10,7 @@ import {
 import { makeShortRecipeId, upsertSavedRecipe, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -89,7 +89,7 @@ export default function RecipeDetailsScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const saveRecentView = async (name: string) => {
+  const saveRecentView = useCallback(async (name: string) => {
     try {
       const raw = await AsyncStorage.getItem(RECENT_VIEWS_STORAGE_KEY);
       const previous = raw ? JSON.parse(raw) : [];
@@ -106,7 +106,7 @@ export default function RecipeDetailsScreen() {
     } catch {
       // Ignore history persistence failures.
     }
-  };
+  }, [ingredient, selectedCuisine, selectedLang]);
 
   const saveRecipe = async () => {
     if (!recipe.trim()) return;
@@ -144,7 +144,7 @@ export default function RecipeDetailsScreen() {
     }
   };
 
-  const fetchRecipeDetailsFromBackend = async () => {
+  const fetchRecipeDetailsFromBackend = useCallback(async () => {
     if (!API_BASE_URL) {
       throw new Error('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
     }
@@ -195,7 +195,16 @@ export default function RecipeDetailsScreen() {
 
     if (!instructions) throw new Error('No recipe details returned from backend');
     return { name, instructions, generatedImageUrl };
-  };
+  }, [
+    recipeName,
+    ingredient,
+    selectedCuisine,
+    selectedLang,
+    generationMode,
+    dietPreference,
+    spiceLevel,
+    maxCaloriesPerMeal,
+  ]);
 
   useEffect(() => {
     const loadRecipe = async () => {
@@ -233,7 +242,18 @@ export default function RecipeDetailsScreen() {
     };
 
     loadRecipe();
-  }, [ingredient, recipeName, selectedCuisine, selectedLang, generationMode, dietPreference, spiceLevel, maxCaloriesPerMeal]);
+  }, [
+    ingredient,
+    recipeName,
+    selectedCuisine,
+    selectedLang,
+    generationMode,
+    dietPreference,
+    spiceLevel,
+    maxCaloriesPerMeal,
+    fetchRecipeDetailsFromBackend,
+    saveRecentView,
+  ]);
 
   return (
     <SafeAreaView style={styles.container}>

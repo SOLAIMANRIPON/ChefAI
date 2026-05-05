@@ -93,6 +93,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 20 },
   back: {
     alignSelf: 'flex-start',
+    marginTop: 24,
     marginBottom: 12,
     paddingVertical: 8,
     paddingHorizontal: 12,

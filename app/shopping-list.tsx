@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
   page: { flex: 1 },
   back: {
     alignSelf: 'flex-start',
-    marginTop: 8,
+    marginTop: 42,
     marginBottom: 16,
     paddingVertical: 8,
     paddingHorizontal: 12,
