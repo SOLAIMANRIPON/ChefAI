@@ -48,6 +48,23 @@ function paramString(v: string | string[] | undefined): string | undefined {
   return t || undefined;
 }
 
+function cleanIngredientInput(raw: string): string {
+  return raw
+    .replace(/\b(কমা|comma)\b/gi, ' ')
+    .replace(/\b(ডট|dot|full\s*stop|period)\b/gi, ' ')
+    .replace(/\b(semicolon|semi\s*colon|সেমিকোলন)\b/gi, ' ')
+    .replace(/\b(colon|কোলন)\b/gi, ' ')
+    .replace(/\b(and|এন্ড|ও)\b/gi, ' ')
+    .replace(/\b(new\s*line|নিউ\s*লাইন)\b/gi, ' ')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[()[\]{}]/g, ' ')
+    .replace(/[\s,;|/]+/g, ' ')
+    .replace(/[.!?]{2,}/g, '.')
+    .replace(/^[\s.,;:!?'"-]+|[\s.,;:!?'"-]+$/g, '')
+    .trim();
+}
+
 const uiTranslations: Record<
   string,
   {
@@ -297,6 +314,9 @@ export default function CraftScreen() {
 
   const [freeUsedToday, setFreeUsedToday] = useState(0);
   const [recognizingIngredients, setRecognizingIngredients] = useState(false);
+  const [showVoiceFallbackHint, setShowVoiceFallbackHint] = useState(false);
+  const ingredientInputRef = React.useRef<TextInput>(null);
+  const fallbackHintTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const resolvedLanguage = languageAliasByCountry[selectedLang] ?? selectedLang;
   const uiText = uiTranslations[resolvedLanguage] ?? uiTranslations['English'];
   const dsUi = dietSpiceUi[resolvedLanguage as keyof typeof dietSpiceUi] ?? dietSpiceUi.English;
@@ -362,6 +382,14 @@ export default function CraftScreen() {
       setIngredient(params.ingredient);
     }
   }, [params.ingredient]);
+
+  React.useEffect(() => {
+    return () => {
+      if (fallbackHintTimerRef.current) {
+        clearTimeout(fallbackHintTimerRef.current);
+      }
+    };
+  }, []);
 
   React.useEffect(() => {
     const lang = paramString(params.selectedLang);
@@ -478,6 +506,16 @@ export default function CraftScreen() {
     if (result.canceled || !result.assets[0]?.base64) return;
     const mimeType = result.assets[0].mimeType || 'image/jpeg';
     await detectIngredientsFromBase64(result.assets[0].base64, mimeType);
+  };
+
+  const startVoiceInput = async () => {
+    setErrorMessage('');
+    ingredientInputRef.current?.focus();
+    setShowVoiceFallbackHint(true);
+    if (fallbackHintTimerRef.current) {
+      clearTimeout(fallbackHintTimerRef.current);
+    }
+    fallbackHintTimerRef.current = setTimeout(() => setShowVoiceFallbackHint(false), 5000);
   };
 
   const fetchRecipeNamesFromBackend = async (effectiveDiet: DietPreference) => {
@@ -613,13 +651,17 @@ export default function CraftScreen() {
   };
 
   const handleStartCooking = async () => {
-    if (!ingredient.trim()) return;
+    const normalizedIngredient = cleanIngredientInput(ingredient);
+    if (!normalizedIngredient) return;
+    if (normalizedIngredient !== ingredient) {
+      setIngredient(normalizedIngredient);
+    }
     if (freeUsedToday >= DAILY_FREE_LIMIT) {
       setErrorMessage(uiText.freeLimitEnded);
       return;
     }
 
-    const trimmed = ingredient.trim();
+    const trimmed = normalizedIngredient;
     const conflict = analyzeDietInputConflict(dietPreference, trimmed);
     if (!conflict.ok) {
       const dcUi = dietConflictUi[resolvedLanguage as keyof typeof dietConflictUi] ?? dietConflictUi.English;
@@ -778,12 +820,24 @@ export default function CraftScreen() {
             {uiText.freeRemainingLabel}: {Math.max(DAILY_FREE_LIMIT - freeUsedToday, 0)} / {DAILY_FREE_LIMIT}
           </Text>
           <TextInput
+            ref={ingredientInputRef}
             style={styles.input}
             placeholder={uiText.ingredientPlaceholder}
             placeholderTextColor="#555"
             value={ingredient}
             onChangeText={setIngredient}
+            onEndEditing={(event) => setIngredient(cleanIngredientInput(event.nativeEvent.text))}
           />
+          <TouchableOpacity
+            style={styles.voiceButton}
+            onPress={startVoiceInput}
+            disabled={loading || recognizingIngredients}>
+            <MaterialIcons name="mic" size={18} color="#d3b275" />
+            <Text style={styles.voiceButtonText}>Use Voice Input (Keyboard Mic)</Text>
+          </TouchableOpacity>
+          {showVoiceFallbackHint ? (
+            <Text style={styles.voiceHintText}>Keyboard খুলে mic আইকনে ট্যাপ করে কথা বলুন.</Text>
+          ) : null}
           <View style={styles.scanRow}>
             <TouchableOpacity
               style={[styles.scanButton, recognizingIngredients && styles.scanButtonDisabled]}
@@ -884,6 +938,20 @@ const styles = StyleSheet.create({
   inputCard: { width: '100%', backgroundColor: '#111', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#222', marginBottom: 25 },
   limitText: { color: '#9f9f9f', fontSize: 12, marginBottom: 8 },
   input: { color: '#fff', fontSize: 16, borderBottomWidth: 1, borderBottomColor: '#333', paddingVertical: 12, marginBottom: 25 },
+  voiceButton: {
+    borderWidth: 1,
+    borderColor: '#4a3f2a',
+    backgroundColor: '#0f0f0f',
+    borderRadius: 12,
+    minHeight: 48,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  voiceButtonText: { color: '#d3b275', fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
+  voiceHintText: { color: '#9f9f9f', fontSize: 12, marginBottom: 8 },
   button: { backgroundColor: '#d3b275', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   buttonText: { color: '#000', fontSize: 18, fontWeight: 'bold', letterSpacing: 1.2 },
   scanRow: {
