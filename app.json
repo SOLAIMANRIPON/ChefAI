@@ -28,7 +28,14 @@
           "photosPermission": "ChefAI needs photo access so you can share your cooking in Community."
         }
       ],
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "color": "#000000",
+          "enableBackgroundRemoteNotifications": false
+        }
+      ]
     ],
     "extra": {
       "eas": {

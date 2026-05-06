@@ -1,6 +1,10 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HOME_EXPLORE_NAV_RESERVED_BOTTOM, HomeExploreNav } from '@/components/home-explore-nav';
 import { clearCookModeSession, loadCookModeSession } from '@/constants/cook-mode-session';
+import {
+  cancelCookTimerNotification,
+  scheduleCookTimerNotification,
+} from '@/lib/cook-timer-notifications';
 import { extractMinutesFromStep, parseRecipeSteps } from '@/lib/recipe-steps';
 import { playTimerDoneSound } from '@/lib/timer-alarm';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -50,6 +54,24 @@ export default function CookModeScreen() {
   const [finishedBanner, setFinishedBanner] = React.useState(false);
 
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const scheduledNotificationIdRef = React.useRef<string | null>(null);
+  const remainingSecondsRef = React.useRef(0);
+
+  remainingSecondsRef.current = remainingSeconds;
+
+  const syncCookTimerNotification = React.useCallback(
+    async (fireAtMs: number, dish: string, label: string) => {
+      await cancelCookTimerNotification(scheduledNotificationIdRef.current);
+      scheduledNotificationIdRef.current = null;
+      const id = await scheduleCookTimerNotification({
+        fireAtMs,
+        dishName: dish,
+        stepLabel: label,
+      });
+      if (id) scheduledNotificationIdRef.current = id;
+    },
+    []
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -74,6 +96,8 @@ export default function CookModeScreen() {
     return () => {
       void clearCookModeSession();
       if (intervalRef.current) clearInterval(intervalRef.current);
+      void cancelCookTimerNotification(scheduledNotificationIdRef.current);
+      scheduledNotificationIdRef.current = null;
     };
   }, []);
 
@@ -88,6 +112,8 @@ export default function CookModeScreen() {
     intervalRef.current = setInterval(() => {
       setRemainingSeconds((r) => {
         if (r <= 1) {
+          void cancelCookTimerNotification(scheduledNotificationIdRef.current);
+          scheduledNotificationIdRef.current = null;
           setTimerStatus('idle');
           setFinishedBanner(true);
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -114,6 +140,8 @@ export default function CookModeScreen() {
     timerStatus === 'running' || timerStatus === 'paused' || finishedBanner || remainingSeconds > 0;
 
   const stopTimerFully = () => {
+    void cancelCookTimerNotification(scheduledNotificationIdRef.current);
+    scheduledNotificationIdRef.current = null;
     setTimerStatus('idle');
     setRemainingSeconds(0);
     setFinishedBanner(false);
@@ -126,7 +154,40 @@ export default function CookModeScreen() {
     setRemainingSeconds(bounded);
     setFinishedBanner(false);
     setTimerStatus('running');
+    const fireAt = Date.now() + bounded * 1000;
+    void syncCookTimerNotification(fireAt, dishName, label);
   };
+
+  const togglePauseResume = React.useCallback(() => {
+    setTimerStatus((prev) => {
+      if (prev === 'running') {
+        void cancelCookTimerNotification(scheduledNotificationIdRef.current);
+        scheduledNotificationIdRef.current = null;
+        return 'paused';
+      }
+      if (prev === 'paused') {
+        const r = Math.max(1, remainingSecondsRef.current);
+        const fireAt = Date.now() + r * 1000;
+        const label =
+          timerLabel.trim() || truncateLabel(currentStepText, 42);
+        void syncCookTimerNotification(fireAt, dishName, label);
+        return 'running';
+      }
+      return prev;
+    });
+  }, [dishName, timerLabel, currentStepText, syncCookTimerNotification]);
+
+  const addOneMinute = React.useCallback(() => {
+    if (timerStatus !== 'running') return;
+    setRemainingSeconds((r) => {
+      const next = r + 60;
+      const fireAt = Date.now() + next * 1000;
+      const label =
+        timerLabel.trim() || truncateLabel(currentStepText, 42);
+      void syncCookTimerNotification(fireAt, dishName, label);
+      return next;
+    });
+  }, [timerStatus, dishName, timerLabel, currentStepText, syncCookTimerNotification]);
 
   const parseCustomMinutes = (): number | null => {
     const n = Number.parseInt(customMinutes.trim(), 10);
@@ -327,20 +388,14 @@ export default function CookModeScreen() {
                   <Text style={styles.timerStickyClock}>{formatMmSs(remainingSeconds)}</Text>
                 </View>
                 <View style={styles.timerStickyActions}>
-                  <TouchableOpacity
-                    style={styles.timerIconBtn}
-                    onPress={() =>
-                      setTimerStatus((s) => (s === 'running' ? 'paused' : 'running'))
-                    }>
+                  <TouchableOpacity style={styles.timerIconBtn} onPress={togglePauseResume}>
                     <MaterialIcons
                       name={timerStatus === 'running' ? 'pause' : 'play-arrow'}
                       size={28}
                       color={GOLD}
                     />
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.timerIconBtn}
-                    onPress={() => setRemainingSeconds((r) => r + 60)}>
+                  <TouchableOpacity style={styles.timerIconBtn} onPress={addOneMinute}>
                     <Text style={styles.plusOneText}>+১ মি</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.timerIconBtn} onPress={stopTimerFully}>
