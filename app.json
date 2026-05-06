@@ -35,7 +35,8 @@
           "color": "#000000",
           "enableBackgroundRemoteNotifications": false
         }
-      ]
+      ],
+      "expo-speech-recognition"
     ],
     "extra": {
       "eas": {

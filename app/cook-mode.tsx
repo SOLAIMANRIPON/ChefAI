@@ -8,7 +8,9 @@ import {
 import { extractMinutesFromStep, parseRecipeSteps } from '@/lib/recipe-steps';
 import { playTimerDoneSound } from '@/lib/timer-alarm';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
+import * as Speech from 'expo-speech';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
@@ -38,6 +40,63 @@ function truncateLabel(text: string, max = 42) {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
+type VoiceCommand =
+  | 'next'
+  | 'previous'
+  | 'repeat'
+  | 'pause_audio'
+  | 'resume_audio'
+  | 'mark_done'
+  | 'pause_timer'
+  | 'resume_timer'
+  | 'stop_timer'
+  | null;
+
+type SpeechRecognitionPermission = { granted?: boolean };
+type SpeechRecognitionListener = { remove: () => void };
+type SpeechRecognitionResultEvent = { results?: { transcript?: string }[] };
+type SpeechRecognitionModuleLike = {
+  requestPermissionsAsync: () => Promise<SpeechRecognitionPermission>;
+  start: (options: { lang?: string; interimResults?: boolean; continuous?: boolean }) => void;
+  stop: () => void;
+  addListener?: (
+    eventName: 'start' | 'end' | 'result' | 'error',
+    listener: (event: any) => void
+  ) => SpeechRecognitionListener;
+};
+
+async function resolveSpeechRecognitionModule(): Promise<SpeechRecognitionModuleLike | null> {
+  // Expo Go does not include this native module; skip import to avoid runtime toast/error logs.
+  if (Constants.appOwnership === 'expo') {
+    return null;
+  }
+  try {
+    const loaded = await import('expo-speech-recognition');
+    return (loaded?.ExpoSpeechRecognitionModule as SpeechRecognitionModuleLike | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function parseVoiceCommand(raw: string): VoiceCommand {
+  const text = raw.toLowerCase().trim();
+  const hasWakeWord = /(chef|শেফ)/i.test(text);
+  if (!hasWakeWord) return null;
+  const body = text.replace(/chef|শেফ/gi, ' ').replace(/\s+/g, ' ').trim();
+
+  if (!body) return null;
+  if (/(next|পরের)/i.test(body)) return 'next';
+  if (/(previous|আগের)/i.test(body)) return 'previous';
+  if (/(repeat|আবার|পুনরায়)/i.test(body)) return 'repeat';
+  if (/(pause audio|pause reading|থামো|চুপ)/i.test(body)) return 'pause_audio';
+  if (/(resume audio|resume reading|চালাও|আবার চালাও)/i.test(body)) return 'resume_audio';
+  if (/(done|completed|শেষ|সম্পন্ন)/i.test(body)) return 'mark_done';
+  if (/(pause timer|টাইমার থামাও)/i.test(body)) return 'pause_timer';
+  if (/(resume timer|টাইমার চালাও)/i.test(body)) return 'resume_timer';
+  if (/(stop timer|টাইমার বন্ধ)/i.test(body)) return 'stop_timer';
+  return null;
+}
+
 export default function CookModeScreen() {
   const router = useRouter();
   const [dishName, setDishName] = React.useState('');
@@ -52,10 +111,16 @@ export default function CookModeScreen() {
   const [remainingSeconds, setRemainingSeconds] = React.useState(0);
   const [timerStatus, setTimerStatus] = React.useState<'idle' | 'running' | 'paused'>('idle');
   const [finishedBanner, setFinishedBanner] = React.useState(false);
+  const [audioPaused, setAudioPaused] = React.useState(false);
+  const [handsFreeEnabled, setHandsFreeEnabled] = React.useState(false);
+  const [voiceStatusText, setVoiceStatusText] = React.useState('Voice চলছে না');
+  const [speechRecognitionModule, setSpeechRecognitionModule] = React.useState<SpeechRecognitionModuleLike | null>(null);
 
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const scheduledNotificationIdRef = React.useRef<string | null>(null);
   const remainingSecondsRef = React.useRef(0);
+  const lastVoiceTranscriptRef = React.useRef('');
+  const lastVoiceCommandAtRef = React.useRef(0);
 
   remainingSecondsRef.current = remainingSeconds;
 
@@ -97,9 +162,11 @@ export default function CookModeScreen() {
       void clearCookModeSession();
       if (intervalRef.current) clearInterval(intervalRef.current);
       void cancelCookTimerNotification(scheduledNotificationIdRef.current);
+      speechRecognitionModule?.stop();
+      Speech.stop();
       scheduledNotificationIdRef.current = null;
     };
-  }, []);
+  }, [speechRecognitionModule]);
 
   React.useEffect(() => {
     if (timerStatus !== 'running') {
@@ -139,14 +206,14 @@ export default function CookModeScreen() {
   const timerStripVisible =
     timerStatus === 'running' || timerStatus === 'paused' || finishedBanner || remainingSeconds > 0;
 
-  const stopTimerFully = () => {
+  const stopTimerFully = React.useCallback(() => {
     void cancelCookTimerNotification(scheduledNotificationIdRef.current);
     scheduledNotificationIdRef.current = null;
     setTimerStatus('idle');
     setRemainingSeconds(0);
     setFinishedBanner(false);
     setTimerLabel('');
-  };
+  }, []);
 
   const startTimerSeconds = (seconds: number, label: string) => {
     const bounded = Math.min(24 * 3600, Math.max(1, Math.round(seconds)));
@@ -221,17 +288,165 @@ export default function CookModeScreen() {
     });
   };
 
-  const markCurrentDoneAndAdvance = () => {
+  const markCurrentDoneAndAdvance = React.useCallback(() => {
     setDone((prev) => {
       const next = [...prev];
       next[safeIndex] = true;
       return next;
     });
     if (safeIndex < stepCount - 1) setCurrentIndex(safeIndex + 1);
-  };
+  }, [safeIndex, stepCount]);
 
   const scrollBottomPad =
     20 + HOME_EXPLORE_NAV_RESERVED_BOTTOM + (timerStripVisible ? TIMER_STICKY_MIN_HEIGHT + 8 : 0) + PADDING_BOTTOM_EXTRA;
+
+  const speakCurrentStep = React.useCallback(
+    (prefix?: string) => {
+      if (audioPaused || !currentStepText.trim()) return;
+      const spoken = prefix ? `${prefix}. ${currentStepText}` : currentStepText;
+      Speech.stop();
+      Speech.speak(spoken, {
+        language: 'bn-BD',
+        rate: 0.94,
+      });
+    },
+    [audioPaused, currentStepText]
+  );
+
+  React.useEffect(() => {
+    if (!handsFreeEnabled) return;
+    speakCurrentStep(`ধাপ ${safeIndex + 1}`);
+  }, [handsFreeEnabled, safeIndex, speakCurrentStep]);
+
+  const runVoiceCommand = React.useCallback(
+    (command: VoiceCommand) => {
+      if (!command) return;
+      switch (command) {
+        case 'next':
+          setCurrentIndex((i) => Math.min(stepCount - 1, i + 1));
+          break;
+        case 'previous':
+          setCurrentIndex((i) => Math.max(0, i - 1));
+          break;
+        case 'repeat':
+          speakCurrentStep();
+          break;
+        case 'pause_audio':
+          setAudioPaused(true);
+          Speech.stop();
+          break;
+        case 'resume_audio':
+          setAudioPaused(false);
+          setTimeout(() => speakCurrentStep(), 80);
+          break;
+        case 'mark_done':
+          markCurrentDoneAndAdvance();
+          break;
+        case 'pause_timer':
+          if (timerStatus === 'running') togglePauseResume();
+          break;
+        case 'resume_timer':
+          if (timerStatus === 'paused') togglePauseResume();
+          break;
+        case 'stop_timer':
+          stopTimerFully();
+          break;
+        default:
+          break;
+      }
+    },
+    [markCurrentDoneAndAdvance, speakCurrentStep, stepCount, stopTimerFully, timerStatus, togglePauseResume]
+  );
+
+  React.useEffect(() => {
+    if (!speechRecognitionModule?.addListener) return;
+
+    const onResult = speechRecognitionModule.addListener('result', (event: SpeechRecognitionResultEvent) => {
+      const transcript = event.results?.[0]?.transcript?.trim();
+      if (!transcript) return;
+      if (transcript === lastVoiceTranscriptRef.current) return;
+
+      const now = Date.now();
+      if (now - lastVoiceCommandAtRef.current < 900) return;
+
+      const command = parseVoiceCommand(transcript);
+      if (!command) return;
+      lastVoiceTranscriptRef.current = transcript;
+      lastVoiceCommandAtRef.current = now;
+      runVoiceCommand(command);
+    });
+
+    const onError = speechRecognitionModule.addListener('error', () => {
+      setVoiceStatusText('Voice command reconnect হচ্ছে...');
+      setTimeout(() => {
+        if (!handsFreeEnabled) return;
+        speechRecognitionModule.start({
+          lang: 'bn-BD',
+          interimResults: true,
+          continuous: true,
+        });
+      }, 500);
+    });
+
+    const onStart = speechRecognitionModule.addListener('start', () => {
+      setVoiceStatusText('Voice command শুনছে: Chef ...');
+    });
+
+    const onEnd = speechRecognitionModule.addListener('end', () => {
+      if (!handsFreeEnabled) return;
+      setVoiceStatusText('Voice command restart হচ্ছে...');
+      setTimeout(() => {
+        if (!handsFreeEnabled) return;
+        speechRecognitionModule.start({
+          lang: 'bn-BD',
+          interimResults: true,
+          continuous: true,
+        });
+      }, 250);
+    });
+
+    return () => {
+      onResult?.remove();
+      onError?.remove();
+      onStart?.remove();
+      onEnd?.remove();
+    };
+  }, [handsFreeEnabled, runVoiceCommand, speechRecognitionModule]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const setupHandsFree = async () => {
+      try {
+        const mod = await resolveSpeechRecognitionModule();
+        if (cancelled) return;
+        setSpeechRecognitionModule(mod);
+        if (!mod) {
+          setVoiceStatusText('Voice command unavailable here. Use dev build.');
+          return;
+        }
+        const permission = await mod.requestPermissionsAsync();
+        if (!permission.granted) {
+          setVoiceStatusText('Mic permission off - voice command বন্ধ');
+          return;
+        }
+        if (cancelled) return;
+        setHandsFreeEnabled(true);
+        setVoiceStatusText('Voice command শুনছে: Chef ...');
+        mod.start({
+          lang: 'bn-BD',
+          interimResults: true,
+          continuous: true,
+        });
+      } catch {
+        setVoiceStatusText('Voice command unavailable (dev build needed)');
+      }
+    };
+    void setupHandsFree();
+    return () => {
+      cancelled = true;
+      Speech.stop();
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -261,6 +476,13 @@ export default function CookModeScreen() {
           <Text style={styles.progressLine}>
             ধাপ {safeIndex + 1} / {stepCount}
           </Text>
+          <View style={styles.voiceInfoCard}>
+            <Text style={styles.voiceInfoTitle}>Hands-free command</Text>
+            <Text style={styles.voiceInfoText}>{voiceStatusText}</Text>
+            <Text style={styles.voiceInfoHint}>
+              বলুন: Chef next, Chef repeat, Chef pause, Chef resume, Chef done
+            </Text>
+          </View>
 
           <View style={styles.stepCard}>
             <Text style={styles.stepBody}>{currentStepText}</Text>
@@ -424,6 +646,17 @@ const styles = StyleSheet.create({
   screenTitle: { color: '#888', fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 },
   dishTitle: { color: GOLD, fontSize: 22, fontWeight: 'bold', marginBottom: 6 },
   progressLine: { color: '#aaa', fontSize: 14, marginBottom: 14 },
+  voiceInfoCard: {
+    backgroundColor: '#101010',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  voiceInfoTitle: { color: GOLD, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 },
+  voiceInfoText: { color: '#ddd', fontSize: 12, marginBottom: 6 },
+  voiceInfoHint: { color: '#999', fontSize: 12, lineHeight: 18 },
   stepCard: {
     backgroundColor: '#111',
     borderRadius: 16,
