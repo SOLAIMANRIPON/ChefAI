@@ -10,6 +10,7 @@ import {
   parseMaxCaloriesParam,
   parseServingsParam,
 } from '@/constants/recipe-preferences';
+import { saveCookModeSession } from '@/constants/cook-mode-session';
 import { getSavedRecipeById, makeShortRecipeId, upsertSavedRecipe, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -121,6 +122,12 @@ export default function RecipeDetailsScreen() {
       // Ignore history persistence failures.
     }
   }, [ingredient, selectedCuisine, selectedLang]);
+
+  const openCookMode = async () => {
+    if (!recipe.trim()) return;
+    await saveCookModeSession({ dishName: dishName.trim() || recipeName.trim(), recipe: recipe.trim() });
+    router.push('/cook-mode');
+  };
 
   const saveRecipe = async () => {
     if (!recipe.trim()) return;
@@ -332,9 +339,19 @@ export default function RecipeDetailsScreen() {
           {`  |  Difficulty: ${difficultyLevel}`}
           {cookTimeMinutes != null ? `  |  Time: ${cookTimeMinutes} min` : ''}
         </Text>
-        <TouchableOpacity style={styles.saveButton} onPress={saveRecipe} disabled={saving || loading || !recipe}>
-          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.saveButton} onPress={saveRecipe} disabled={saving || loading || !recipe}>
+            <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.cookModeButton, (loading || !recipe) && styles.cookModeButtonDisabled]}
+            onPress={openCookMode}
+            disabled={loading || !recipe}
+            accessibilityRole="button"
+            accessibilityLabel="Cook mode">
+            <Text style={styles.cookModeButtonText}>Cook mode</Text>
+          </TouchableOpacity>
+        </View>
 
         {loading ? (
           <View style={styles.loaderWrap}>
@@ -407,17 +424,32 @@ const styles = StyleSheet.create({
   },
   backButtonText: { color: '#d3b275', fontSize: 14, fontWeight: '600' },
   summaryText: { alignSelf: 'flex-start', color: '#9a9a9a', fontSize: 12, marginBottom: 14 },
+  actionRow: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14,
+  },
   saveButton: {
-    alignSelf: 'flex-start',
     backgroundColor: '#1a1a1a',
     borderWidth: 1,
     borderColor: '#444',
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    marginBottom: 14,
   },
   saveButtonText: { color: '#d3b275', fontSize: 13, fontWeight: '600' },
+  cookModeButton: {
+    backgroundColor: '#d3b275',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#e8c989',
+  },
+  cookModeButtonDisabled: { opacity: 0.45 },
+  cookModeButtonText: { color: '#000', fontSize: 13, fontWeight: '700' },
   loaderWrap: { alignItems: 'center', marginTop: 80 },
   loaderText: { color: '#d3b275', marginTop: 10, fontSize: 14 },
   dishImage: {

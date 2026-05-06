@@ -1,4 +1,5 @@
 import { hydrateAppLanguage } from '@/constants/app-language';
+import { hydrateTimerSoundPreference } from '@/constants/timer-sound-preference';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -18,7 +19,7 @@ export default function RootLayout() {
 
   React.useEffect(() => {
     let cancelled = false;
-    hydrateAppLanguage().finally(() => {
+    Promise.all([hydrateAppLanguage(), hydrateTimerSoundPreference()]).finally(() => {
       if (!cancelled) setI18nReady(true);
     });
     return () => {
@@ -40,6 +41,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-list" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-details" options={{ headerShown: false }} />
+        <Stack.Screen name="cook-mode" options={{ headerShown: false }} />
         <Stack.Screen name="shopping-lists" options={{ headerShown: false }} />
         <Stack.Screen name="shopping-list" options={{ headerShown: false }} />
         <Stack.Screen name="community-post" options={{ headerShown: false }} />
