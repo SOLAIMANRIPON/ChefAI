@@ -5,6 +5,7 @@ export const COOK_MODE_SESSION_KEY = 'chefai_cook_mode_session_v1';
 export type CookModeSession = {
   dishName: string;
   recipe: string;
+  language?: string;
 };
 
 export async function saveCookModeSession(payload: CookModeSession): Promise<void> {
@@ -22,7 +23,15 @@ export async function loadCookModeSession(): Promise<CookModeSession | null> {
       typeof (parsed as CookModeSession).dishName === 'string' &&
       typeof (parsed as CookModeSession).recipe === 'string'
     ) {
-      return { dishName: (parsed as CookModeSession).dishName, recipe: (parsed as CookModeSession).recipe };
+      const language =
+        typeof (parsed as CookModeSession).language === 'string'
+          ? (parsed as CookModeSession).language
+          : undefined;
+      return {
+        dishName: (parsed as CookModeSession).dishName,
+        recipe: (parsed as CookModeSession).recipe,
+        ...(language ? { language } : {}),
+      };
     }
     return null;
   } catch {

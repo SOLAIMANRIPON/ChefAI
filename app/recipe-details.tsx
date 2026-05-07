@@ -125,7 +125,11 @@ export default function RecipeDetailsScreen() {
 
   const openCookMode = async () => {
     if (!recipe.trim()) return;
-    await saveCookModeSession({ dishName: dishName.trim() || recipeName.trim(), recipe: recipe.trim() });
+    await saveCookModeSession({
+      dishName: dishName.trim() || recipeName.trim(),
+      recipe: recipe.trim(),
+      language: selectedLang,
+    });
     router.push('/cook-mode');
   };
 

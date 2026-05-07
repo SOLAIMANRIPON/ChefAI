@@ -393,7 +393,7 @@ app.post('/api/v1/ai/recipes/list', async (req, res) => {
       query,
       ingredient,
       cuisine = 'Bangladeshi',
-      language = 'বাংলা',
+      language = 'English',
       generationMode: rawMode,
       dietPreference,
       spiceLevel,
@@ -474,7 +474,7 @@ app.post('/api/v1/ai/recipes/details', async (req, res) => {
       query = '',
       ingredient = '',
       cuisine = 'Bangladeshi',
-      language = 'বাংলা',
+      language = 'English',
       generationMode: rawMode,
       dietPreference,
       spiceLevel,
@@ -594,7 +594,7 @@ Return strict JSON with keys:
 
 app.post('/api/v1/ai/recipes/shopping-list', async (req, res) => {
   try {
-    const { recipeText = '', dishName = 'Recipe', language = 'বাংলা', servings: rawServings } = req.body || {};
+    const { recipeText = '', dishName = 'Recipe', language = 'English', servings: rawServings } = req.body || {};
     const body = String(recipeText || '').trim();
     if (!body) {
       return res.status(400).json({ message: 'recipeText is required' });
@@ -633,7 +633,7 @@ Return ONLY a JSON array of strings. Each string is ONE ingredient NAME only for
 
 app.post('/api/v1/ai/ingredients/recognize', async (req, res) => {
   try {
-    const { imageBase64 = '', language = 'বাংলা' } = req.body || {};
+    const { imageBase64 = '', language = 'English' } = req.body || {};
     const rawImage = String(imageBase64 || '').trim();
     if (!rawImage) {
       return res.status(400).json({ message: 'imageBase64 is required' });

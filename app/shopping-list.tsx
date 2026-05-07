@@ -86,7 +86,7 @@ export default function ShoppingListScreen() {
   const [generating, setGenerating] = React.useState(false);
   const [error, setError] = React.useState('');
   const [recipeBody, setRecipeBody] = React.useState('');
-  const [language, setLanguage] = React.useState('বাংলা');
+  const [language, setLanguage] = React.useState('English');
   const [fallbackNote, setFallbackNote] = React.useState(false);
   const [recipeServings, setRecipeServings] = React.useState(4);
 
@@ -157,7 +157,7 @@ export default function ShoppingListScreen() {
         const name = recipe.dishName || 'Recipe';
         setDishName(name);
         setRecipeBody(recipe.recipe);
-        setLanguage(recipe.language || 'বাংলা');
+        setLanguage(recipe.language || 'English');
         setRecipeServings(parseServingsParam(recipe.servings));
 
         const hasStored = await reloadFromStorage(recipeId, name);
@@ -175,7 +175,7 @@ export default function ShoppingListScreen() {
         }
 
         setLoadingRecipe(false);
-        await generateAndStore(recipeId, name, recipe.recipe, recipe.language || 'বাংলা', parseServingsParam(recipe.servings));
+        await generateAndStore(recipeId, name, recipe.recipe, recipe.language || 'English', parseServingsParam(recipe.servings));
       } catch {
         if (!cancelled) setError('লোড করা যায়নি।');
         if (!cancelled) setLoadingRecipe(false);

@@ -1,5 +1,6 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HOME_EXPLORE_NAV_RESERVED_BOTTOM, HomeExploreNav } from '@/components/home-explore-nav';
+import { resolveUiLanguageKey } from '@/constants/language-alias';
 import { clearCookModeSession, loadCookModeSession } from '@/constants/cook-mode-session';
 import {
   cancelCookTimerNotification,
@@ -50,6 +51,11 @@ type VoiceCommand =
   | 'pause_timer'
   | 'resume_timer'
   | 'stop_timer'
+  | 'start_step_timer'
+  | 'scroll_up'
+  | 'scroll_down'
+  | 'scroll_top'
+  | 'scroll_bottom'
   | null;
 
 type SpeechRecognitionPermission = { granted?: boolean };
@@ -96,32 +102,496 @@ function stripBengaliNukta(input: string): string {
 
 const WAKE_WORD_RE = /chef|chif|sef|শেফ|সেফ|চেফ|শেপ|সেপ|শেষ|সেস|শাফ|সাফ|শ্যাফ|স্যাফ|চিফ|সিফ|শিফ|সিপ|শিপ/gi;
 
-function parseVoiceCommand(raw: string): VoiceCommand {
-  const text = stripBengaliNukta(raw.toLowerCase().trim());
-  WAKE_WORD_RE.lastIndex = 0;
-  if (!WAKE_WORD_RE.test(text)) return null;
-  const body = text.replace(WAKE_WORD_RE, ' ').replace(/\s+/g, ' ').trim();
-  if (!body) return null;
+const SPEECH_LOCALE_BY_LANGUAGE: Record<string, string> = {
+  বাংলা: 'bn-BD',
+  English: 'en-US',
+  Hindi: 'hi-IN',
+  Arabic: 'ar-SA',
+  French: 'fr-FR',
+  Spanish: 'es-ES',
+  Urdu: 'ur-PK',
+  Japanese: 'ja-JP',
+  Chinese: 'zh-CN',
+  Korean: 'ko-KR',
+  Turkish: 'tr-TR',
+  Persian: 'fa-IR',
+  Greek: 'el-GR',
+  Portuguese: 'pt-BR',
+};
 
-  const hasTimerWord = /timer|টাইমার|টাইমা/i.test(body);
-  if (hasTimerWord) {
-    if (/pause|paus|pose|পজ|থামাও|থামো/i.test(body)) return 'pause_timer';
-    if (/resume|রিজিউম|চালাও/i.test(body)) return 'resume_timer';
-    if (/stop|স্টপ|বন্ধ/i.test(body)) return 'stop_timer';
+type CookModeUi = {
+  loading: string;
+  back: string;
+  cookMode: string;
+  stepWord: string;
+  handsFreeTitle: string;
+  bnVoiceMissingTitle: string;
+  bnVoiceMissingBody: string;
+  prevStep: string;
+  nextStep: string;
+  doneStep: string;
+  timer: string;
+  minutes: string;
+  start: string;
+  noStepTime: string;
+  checklist: string;
+  timeUp: string;
+  close: string;
+  timerRunningTitle: string;
+  timerRunningBody: string;
+  stay: string;
+  leave: string;
+  heardPrefix: string;
+  timerStarted: string;
+  noStepTimeStatus: string;
+  voiceUnavailable: string;
+  voiceOff: string;
+  voiceListening: string;
+  voiceReconnect: string;
+  voiceRestart: string;
+  micPermissionOff: string;
+  voiceNeedsDevBuild: string;
+  audioOnA11y: string;
+  audioOffA11y: string;
+  voiceOnA11y: string;
+  voiceOffA11y: string;
+};
+
+const EN_UI: CookModeUi = {
+  loading: 'Loading…',
+  back: '← Back',
+  cookMode: 'Cook Mode',
+  stepWord: 'Step',
+  handsFreeTitle: 'Hands-free command',
+  bnVoiceMissingTitle: 'Required TTS voice missing',
+  bnVoiceMissingBody:
+    'Install a voice for this language in Settings → Text-to-speech output → Google → Install voice data.',
+  prevStep: 'Previous step',
+  nextStep: 'Next step',
+  doneStep: 'Mark step done',
+  timer: 'Timer',
+  minutes: 'Minutes',
+  start: 'Start',
+  noStepTime: 'No time mentioned in this step. Enter minutes below to start.',
+  checklist: 'Checklist',
+  timeUp: 'Time is up',
+  close: 'Close',
+  timerRunningTitle: 'Timer is running',
+  timerRunningBody: 'Stop timer and leave?',
+  stay: 'Stay',
+  leave: 'Leave',
+  heardPrefix: 'Heard',
+  timerStarted: 'Timer started',
+  noStepTimeStatus: 'No step time found for timer',
+  voiceUnavailable: 'Voice command unavailable here. Use dev build.',
+  voiceOff: 'Voice command off',
+  voiceListening: 'Voice command listening: Chef ...',
+  voiceReconnect: 'Voice command reconnecting...',
+  voiceRestart: 'Voice command restarting...',
+  micPermissionOff: 'Mic permission off - voice command disabled',
+  voiceNeedsDevBuild: 'Voice command unavailable (dev build needed)',
+  audioOnA11y: 'Turn audio on',
+  audioOffA11y: 'Turn audio off',
+  voiceOnA11y: 'Turn voice command on',
+  voiceOffA11y: 'Turn voice command off',
+};
+
+const COOK_UI_TEXT: Record<string, CookModeUi> = {
+  বাংলা: {
+    loading: 'লোড হচ্ছে…',
+    back: '← ফিরে যান',
+    cookMode: 'কুক মোড',
+    stepWord: 'ধাপ',
+    handsFreeTitle: 'Hands-free command',
+    bnVoiceMissingTitle: 'বাংলা TTS voice নেই',
+    bnVoiceMissingBody:
+      'Recipe বাংলায় ঠিকঠাক পড়াতে বাংলা voice install করুন: Settings → General management → Text-to-speech output → Google → Install voice data → Bengali (Bangladesh)।',
+    prevStep: 'আগের ধাপ',
+    nextStep: 'পরের ধাপ',
+    doneStep: 'এই ধাপ শেষ',
+    timer: 'টাইমার',
+    minutes: 'মিনিট',
+    start: 'শুরু',
+    noStepTime: 'এই ধাপে সময় উল্লেখ নেই—নিচে মিনিট লিখে শুরু করুন।',
+    checklist: 'চেকলিস্ট',
+    timeUp: 'সময় শেষ',
+    close: 'বন্ধ',
+    timerRunningTitle: 'টাইমার চলছে',
+    timerRunningBody: 'টাইমার থামিয়ে বের হবেন?',
+    stay: 'থাকুন',
+    leave: 'বের হোন',
+    heardPrefix: 'শুনলাম',
+    timerStarted: 'টাইমার শুরু হয়েছে',
+    noStepTimeStatus: 'এই ধাপে টাইমার সময় পাওয়া যায়নি',
+    voiceUnavailable: 'Voice command unavailable here. Use dev build.',
+    voiceOff: 'Voice command বন্ধ',
+    voiceListening: 'Voice command শুনছে: Chef ...',
+    voiceReconnect: 'Voice command reconnect হচ্ছে...',
+    voiceRestart: 'Voice command restart হচ্ছে...',
+    micPermissionOff: 'Mic permission off - voice command বন্ধ',
+    voiceNeedsDevBuild: 'Voice command unavailable (dev build needed)',
+    audioOnA11y: 'অডিও চালু করুন',
+    audioOffA11y: 'অডিও বন্ধ করুন',
+    voiceOnA11y: 'ভয়েস কমান্ড চালু করুন',
+    voiceOffA11y: 'ভয়েস কমান্ড বন্ধ করুন',
+  },
+  English: EN_UI,
+  Hindi: EN_UI,
+  Arabic: EN_UI,
+  French: EN_UI,
+  Spanish: EN_UI,
+  Urdu: EN_UI,
+  Japanese: EN_UI,
+  Chinese: EN_UI,
+  Korean: EN_UI,
+  Turkish: EN_UI,
+  Persian: EN_UI,
+  Greek: EN_UI,
+  Portuguese: EN_UI,
+};
+
+function normalizeCommandText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[.,!?;:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeBnCommandText(input: string): string {
+  return normalizeCommandText(stripBengaliNukta(input))
+    .replace(/\bধপ\b/g, 'ধাপ')
+    .replace(/\bধাব\b/g, 'ধাপ')
+    .replace(/\bবলো\b/g, 'বল')
+    .replace(/\bবলুন\b/g, 'বল')
+    .replace(/\bটাইমার\b/g, 'টাইমার')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const COMMAND_CANONICALS: Record<string, Record<Exclude<VoiceCommand, null>, string[]>> = {
+  বাংলা: {
+    next: ['পরের ধাপ বল', 'পরের ধাপ', 'নেক্সট ধাপ'],
+    previous: ['আগের ধাপ বল', 'আগের ধাপ'],
+    repeat: ['আবার বল', 'আবার পড়ো', 'রিপিট কর'],
+    pause_audio: ['এখন থাম', 'ভয়েস থামাও', 'পড়া থামাও'],
+    resume_audio: ['এখন বল', 'আবার বলো', 'চালাও'],
+    mark_done: ['এই ধাপ শেষ', 'ধাপ শেষ', 'এই ধাপ সম্পন্ন'],
+    pause_timer: ['টাইমার থামাও', 'টাইমার পজ কর'],
+    resume_timer: ['টাইমার চালাও', 'টাইমার রিজিউম কর'],
+    stop_timer: ['টাইমার বন্ধ কর', 'টাইমার স্টপ কর'],
+    start_step_timer: ['টাইমার শুরু কর', 'এই ধাপের টাইমার শুরু কর'],
+    scroll_up: ['উপরে ওঠো', 'একটু উপরে', 'উপরে যাও', 'উপরে স্ক্রল কর'],
+    scroll_down: ['নিচে নামো', 'একটু নিচে', 'নিচে যাও', 'নিচে স্ক্রল কর'],
+    scroll_top: ['একদম উপরে', 'সবচেয়ে উপরে যাও'],
+    scroll_bottom: ['একদম নিচে', 'সবচেয়ে নিচে যাও'],
+  },
+  English: {
+    next: ['next step'],
+    previous: ['previous step'],
+    repeat: ['repeat step', 'say again'],
+    pause_audio: ['pause now', 'pause voice'],
+    resume_audio: ['speak now', 'resume voice'],
+    mark_done: ['mark this step done', 'step done'],
+    pause_timer: ['pause timer'],
+    resume_timer: ['resume timer'],
+    stop_timer: ['stop timer', 'cancel timer'],
+    start_step_timer: ['start timer', 'start step timer'],
+    scroll_up: ['scroll up', 'move up', 'go up'],
+    scroll_down: ['scroll down', 'move down', 'go down'],
+    scroll_top: ['go to top', 'scroll to top'],
+    scroll_bottom: ['go to bottom', 'scroll to bottom'],
+  },
+  Hindi: {
+    next: ['अगला स्टेप बोलो'],
+    previous: ['पिछला स्टेप बोलो'],
+    repeat: ['फिर से बोलो'],
+    pause_audio: ['अभी रुक जाओ'],
+    resume_audio: ['अभी बोलो'],
+    mark_done: ['यह स्टेप पूरा'],
+    pause_timer: ['टाइमर रोक दो'],
+    resume_timer: ['टाइमर चालू करो'],
+    stop_timer: ['टाइमर बंद करो'],
+    start_step_timer: ['टाइमर शुरू करो'],
+    scroll_up: ['ऊपर जाओ'],
+    scroll_down: ['नीचे जाओ'],
+    scroll_top: ['सबसे ऊपर जाओ'],
+    scroll_bottom: ['सबसे नीचे जाओ'],
+  },
+  Arabic: {
+    next: ['الخطوة التالية'],
+    previous: ['الخطوة السابقة'],
+    repeat: ['اعد مرة اخرى'],
+    pause_audio: ['توقف الآن'],
+    resume_audio: ['تكلم الآن'],
+    mark_done: ['هذه الخطوة انتهت'],
+    pause_timer: ['اوقف المؤقت'],
+    resume_timer: ['اكمل المؤقت'],
+    stop_timer: ['الغ المؤقت'],
+    start_step_timer: ['ابدأ المؤقت'],
+    scroll_up: ['الى الاعلى'],
+    scroll_down: ['الى الاسفل'],
+    scroll_top: ['الى اعلى الصفحة'],
+    scroll_bottom: ['الى اسفل الصفحة'],
+  },
+  French: {
+    next: ['etape suivante'],
+    previous: ['etape precedente'],
+    repeat: ['repete encore'],
+    pause_audio: ['arrete maintenant'],
+    resume_audio: ['parle maintenant'],
+    mark_done: ['cette etape est terminee'],
+    pause_timer: ['pause minuteur'],
+    resume_timer: ['reprendre minuteur'],
+    stop_timer: ['arreter minuteur'],
+    start_step_timer: ['demarrer minuteur'],
+    scroll_up: ['defiler vers le haut'],
+    scroll_down: ['defiler vers le bas'],
+    scroll_top: ['aller en haut'],
+    scroll_bottom: ['aller en bas'],
+  },
+  Spanish: {
+    next: ['siguiente paso'],
+    previous: ['paso anterior'],
+    repeat: ['repite otra vez'],
+    pause_audio: ['pausa ahora'],
+    resume_audio: ['habla ahora'],
+    mark_done: ['este paso listo'],
+    pause_timer: ['pausar temporizador'],
+    resume_timer: ['reanudar temporizador'],
+    stop_timer: ['detener temporizador'],
+    start_step_timer: ['iniciar temporizador'],
+    scroll_up: ['desplazar arriba'],
+    scroll_down: ['desplazar abajo'],
+    scroll_top: ['ir arriba del todo'],
+    scroll_bottom: ['ir abajo del todo'],
+  },
+  Urdu: {
+    next: ['اگلا قدم بولو'],
+    previous: ['پچھلا قدم بولو'],
+    repeat: ['دوبارہ بولو'],
+    pause_audio: ['ابھی رکو'],
+    resume_audio: ['ابھی بولو'],
+    mark_done: ['یہ قدم مکمل'],
+    pause_timer: ['ٹائمر روک دو'],
+    resume_timer: ['ٹائمر چلاو'],
+    stop_timer: ['ٹائمر بند کرو'],
+    start_step_timer: ['ٹائمر شروع کرو'],
+    scroll_up: ['اوپر جاؤ'],
+    scroll_down: ['نیچے جاؤ'],
+    scroll_top: ['سب سے اوپر جاؤ'],
+    scroll_bottom: ['سب سے نیچے جاؤ'],
+  },
+  Japanese: {
+    next: ['つぎのステップ'],
+    previous: ['まえのステップ'],
+    repeat: ['もういちど'],
+    pause_audio: ['いま とめて'],
+    resume_audio: ['いま はなして'],
+    mark_done: ['このステップ おわり'],
+    pause_timer: ['タイマー いちじていし'],
+    resume_timer: ['タイマー さいかい'],
+    stop_timer: ['タイマー ていし'],
+    start_step_timer: ['タイマー かいし'],
+    scroll_up: ['うえにスクロール'],
+    scroll_down: ['したにスクロール'],
+    scroll_top: ['いちばんうえへ'],
+    scroll_bottom: ['いちばんしたへ'],
+  },
+  Chinese: {
+    next: ['下一步'],
+    previous: ['上一步'],
+    repeat: ['再说一遍'],
+    pause_audio: ['现在暂停'],
+    resume_audio: ['现在说'],
+    mark_done: ['这一步完成'],
+    pause_timer: ['暂停计时器'],
+    resume_timer: ['继续计时器'],
+    stop_timer: ['停止计时器'],
+    start_step_timer: ['开始计时器'],
+    scroll_up: ['向上滚动'],
+    scroll_down: ['向下滚动'],
+    scroll_top: ['滚动到顶部'],
+    scroll_bottom: ['滚动到底部'],
+  },
+  Korean: {
+    next: ['다음 단계'],
+    previous: ['이전 단계'],
+    repeat: ['다시 말해줘'],
+    pause_audio: ['지금 멈춰'],
+    resume_audio: ['지금 말해'],
+    mark_done: ['이 단계 완료'],
+    pause_timer: ['타이머 일시정지'],
+    resume_timer: ['타이머 계속'],
+    stop_timer: ['타이머 중지'],
+    start_step_timer: ['타이머 시작'],
+    scroll_up: ['위로 스크롤'],
+    scroll_down: ['아래로 스크롤'],
+    scroll_top: ['맨 위로 가기'],
+    scroll_bottom: ['맨 아래로 가기'],
+  },
+  Turkish: {
+    next: ['sonraki adim'],
+    previous: ['onceki adim'],
+    repeat: ['tekrar soyle'],
+    pause_audio: ['simdi dur'],
+    resume_audio: ['simdi konus'],
+    mark_done: ['bu adim bitti'],
+    pause_timer: ['zamanlayiciyi duraklat'],
+    resume_timer: ['zamanlayiciyi devam ettir'],
+    stop_timer: ['zamanlayiciyi durdur'],
+    start_step_timer: ['zamanlayiciyi baslat'],
+    scroll_up: ['yukari kaydir'],
+    scroll_down: ['asagi kaydir'],
+    scroll_top: ['en üste git'],
+    scroll_bottom: ['en alta git'],
+  },
+  Persian: {
+    next: ['مرحله بعد'],
+    previous: ['مرحله قبل'],
+    repeat: ['دوباره بگو'],
+    pause_audio: ['الان توقف'],
+    resume_audio: ['الان بگو'],
+    mark_done: ['این مرحله تمام'],
+    pause_timer: ['تایمر را متوقف کن'],
+    resume_timer: ['تایمر را ادامه بده'],
+    stop_timer: ['تایمر را لغو کن'],
+    start_step_timer: ['تایمر را شروع کن'],
+    scroll_up: ['به بالا برو'],
+    scroll_down: ['به پایین برو'],
+    scroll_top: ['برو بالای صفحه'],
+    scroll_bottom: ['برو پایین صفحه'],
+  },
+  Greek: {
+    next: ['επομενο βημα'],
+    previous: ['προηγουμενο βημα'],
+    repeat: ['πεισ το ξανα'],
+    pause_audio: ['σταματα τωρα'],
+    resume_audio: ['μιλα τωρα'],
+    mark_done: ['αυτο το βημα τελος'],
+    pause_timer: ['παυση χρονομετρητη'],
+    resume_timer: ['συνεχεια χρονομετρητη'],
+    stop_timer: ['σταματημα χρονομετρητη'],
+    start_step_timer: ['εναρξη χρονομετρητη'],
+    scroll_up: ['κυλιση πανω'],
+    scroll_down: ['κυλιση κατω'],
+    scroll_top: ['πηγαινε στην κορυφη'],
+    scroll_bottom: ['πηγαινε στο τελος'],
+  },
+  Portuguese: {
+    next: ['proximo passo'],
+    previous: ['passo anterior'],
+    repeat: ['repete de novo'],
+    pause_audio: ['pausa agora'],
+    resume_audio: ['fale agora'],
+    mark_done: ['este passo concluido'],
+    pause_timer: ['pausar temporizador'],
+    resume_timer: ['retomar temporizador'],
+    stop_timer: ['parar temporizador'],
+    start_step_timer: ['iniciar temporizador'],
+    scroll_up: ['rolar para cima'],
+    scroll_down: ['rolar para baixo'],
+    scroll_top: ['ir para o topo'],
+    scroll_bottom: ['ir para o fim'],
+  },
+};
+
+const UNIVERSAL_ENGLISH_FALLBACK = COMMAND_CANONICALS.English;
+
+function getCommandCatalog(uiLanguage: string): Record<Exclude<VoiceCommand, null>, string[]> {
+  const base = COMMAND_CANONICALS[uiLanguage];
+  if (!base) return UNIVERSAL_ENGLISH_FALLBACK;
+  const merged = { ...base };
+  (Object.keys(UNIVERSAL_ENGLISH_FALLBACK) as Exclude<VoiceCommand, null>[]).forEach((intent) => {
+    merged[intent] = [...base[intent], ...UNIVERSAL_ENGLISH_FALLBACK[intent]];
+  });
+  return merged;
+}
+
+function applyAsrFixes(input: string, uiLanguage: string): string {
+  const base = uiLanguage === 'বাংলা' ? normalizeBnCommandText(input) : normalizeCommandText(input);
+  if (uiLanguage === 'বাংলা') {
+    return base
+      .replace(/\bধপ\b/g, 'ধাপ')
+      .replace(/\bদাপ\b/g, 'ধাপ')
+      .replace(/\bবলে\b/g, 'বল')
+      .replace(/\bবলো\b/g, 'বল')
+      .replace(/\bবলোও\b/g, 'বল')
+      .replace(/\bটামার\b/g, 'টাইমার')
+      .replace(/\bটাইমা\b/g, 'টাইমার')
+      .replace(/\bশুরুু\b/g, 'শুরু')
+      .replace(/\bশুর\b/g, 'শুরু')
+      .replace(/\bআগর\b/g, 'আগের')
+      .replace(/\bপরর\b/g, 'পরের')
+      .replace(/\bধাব\b/g, 'ধাপ')
+      .replace(/\bকমপ্লিট\b/g, 'সম্পন্ন')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
+  return base
+    .replace(/\bnxt\b/g, 'next')
+    .replace(/\bprev\b/g, 'previous')
+    .replace(/\bpleas\b/g, 'please')
+    .replace(/\btimerr\b/g, 'timer')
+    .replace(/\bresum\b/g, 'resume')
+    .replace(/\brepet\b/g, 'repeat')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  if (/next|nxt|নেক্সট|নেক্ষ্ট|নেস্ট|নেক্স|পরের|পরবর্তী|আগাও|এগোও/i.test(body)) return 'next';
-  if (/previous|prev|back|প্রিভিযাস|প্রিবিযাস|প্রিভিযেস|প্রিভিউস|প্রিভাস|প্রিবাস|প্রেভ|ব্যাক|বেক|আগের|পূর্ব|পেছনে|পিছনে/i.test(body)) return 'previous';
-  if (/repeat|again|রিপিট|রিপীট|আবার|পুনরায/i.test(body)) return 'repeat';
-  if (/pause|paus|pose|পজ|থামো|চুপ/i.test(body)) return 'pause_audio';
-  if (/resume|রিজিউম|চালাও/i.test(body)) return 'resume_audio';
-  if (/done|complete|completed|ডান|শেষ করো|শেষ করুন|শেষ হযেছে|হযে গেছে|সম্পন্ন/i.test(body)) return 'mark_done';
-  return null;
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const dp = Array.from({ length: a.length + 1 }, () => Array<number>(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function bestFuzzyCommandMatch(
+  text: string,
+  catalog: Record<Exclude<VoiceCommand, null>, string[]>,
+  uiLanguage: string
+): VoiceCommand {
+  let best: { command: VoiceCommand; distance: number; phraseLength: number } = {
+    command: null,
+    distance: Number.POSITIVE_INFINITY,
+    phraseLength: 0,
+  };
+  (Object.keys(catalog) as Exclude<VoiceCommand, null>[]).forEach((command) => {
+    catalog[command].forEach((phrase) => {
+      const normalizedPhrase = applyAsrFixes(phrase, uiLanguage);
+      const distance = levenshtein(text, normalizedPhrase);
+      if (distance < best.distance) {
+        best = { command, distance, phraseLength: normalizedPhrase.length };
+      }
+    });
+  });
+  if (!best.command) return null;
+  const threshold = best.phraseLength <= 10 ? 2 : 3;
+  return best.distance <= threshold ? best.command : null;
+}
+
+function parseVoiceCommand(raw: string, uiLanguage: string): VoiceCommand {
+  const text = normalizeCommandText(raw);
+  if (!text) return null;
+  WAKE_WORD_RE.lastIndex = 0;
+  const body = (WAKE_WORD_RE.test(text) ? text.replace(WAKE_WORD_RE, ' ') : text).replace(/\s+/g, ' ').trim();
+  if (!body) return null;
+  const normalized = applyAsrFixes(body, uiLanguage);
+  const catalog = getCommandCatalog(uiLanguage);
+  return bestFuzzyCommandMatch(normalized, catalog, uiLanguage);
 }
 
 export default function CookModeScreen() {
   const router = useRouter();
   const [dishName, setDishName] = React.useState('');
+  const [recipeLanguage, setRecipeLanguage] = React.useState('English');
   const [steps, setSteps] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [currentIndex, setCurrentIndex] = React.useState(0);
@@ -135,13 +605,17 @@ export default function CookModeScreen() {
   const [finishedBanner, setFinishedBanner] = React.useState(false);
   const [audioPaused, setAudioPaused] = React.useState(false);
   const [handsFreeEnabled, setHandsFreeEnabled] = React.useState(false);
-  const [voiceStatusText, setVoiceStatusText] = React.useState('Voice চলছে না');
+  const [voiceStatusText, setVoiceStatusText] = React.useState('Voice command off');
   const [speechRecognitionModule, setSpeechRecognitionModule] = React.useState<SpeechRecognitionModuleLike | null>(null);
   const [bnVoiceMissing, setBnVoiceMissing] = React.useState(false);
 
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const scrollRef = React.useRef<ScrollView | null>(null);
   const scheduledNotificationIdRef = React.useRef<string | null>(null);
   const remainingSecondsRef = React.useRef(0);
+  const scrollYRef = React.useRef(0);
+  const scrollViewportHeightRef = React.useRef(0);
+  const scrollContentHeightRef = React.useRef(0);
   const lastVoiceTranscriptRef = React.useRef('');
   const lastVoiceCommandAtRef = React.useRef(0);
 
@@ -171,6 +645,7 @@ export default function CookModeScreen() {
       }
       const parsed = parseRecipeSteps(session.recipe);
       setDishName(session.dishName?.trim() || 'Recipe');
+      setRecipeLanguage(resolveUiLanguageKey(session.language?.trim() || 'English'));
       setSteps(parsed.length ? parsed : [session.recipe.trim()]);
       setDone(parsed.map(() => false));
       setLoading(false);
@@ -225,6 +700,24 @@ export default function CookModeScreen() {
   const safeIndex = stepCount ? Math.min(currentIndex, stepCount - 1) : 0;
   const currentStepText = steps[safeIndex] ?? '';
   const suggestedMinutes = extractMinutesFromStep(currentStepText);
+  const resolvedVoiceLanguage = resolveUiLanguageKey(recipeLanguage);
+  const ui = COOK_UI_TEXT[resolvedVoiceLanguage] ?? EN_UI;
+  const commandCatalog = getCommandCatalog(resolvedVoiceLanguage);
+  const hintPhrases = [
+    commandCatalog.next[0],
+    commandCatalog.previous[0],
+    commandCatalog.pause_audio[0],
+    commandCatalog.resume_audio[0],
+    commandCatalog.mark_done[0],
+    commandCatalog.start_step_timer[0],
+    commandCatalog.scroll_down[0],
+    commandCatalog.scroll_up[0],
+    commandCatalog.scroll_bottom[0],
+    commandCatalog.scroll_top[0],
+  ].filter(Boolean);
+  const voiceHintText = `${resolvedVoiceLanguage === 'বাংলা' ? 'বলুন' : 'Say'}: ${hintPhrases.join(', ')}`;
+  const speechLocale = SPEECH_LOCALE_BY_LANGUAGE[resolvedVoiceLanguage] ?? 'en-US';
+  const spokenStepPrefix = ui.stepWord;
 
   const timerStripVisible =
     timerStatus === 'running' || timerStatus === 'paused' || finishedBanner || remainingSeconds > 0;
@@ -287,10 +780,10 @@ export default function CookModeScreen() {
 
   const handleBack = () => {
     if (timerStatus === 'running' || timerStatus === 'paused') {
-      Alert.alert('টাইমার চলছে', 'টাইমার থামিয়ে বের হবেন?', [
-        { text: 'থাকুন', style: 'cancel' },
+      Alert.alert(ui.timerRunningTitle, ui.timerRunningBody, [
+        { text: ui.stay, style: 'cancel' },
         {
-          text: 'বের হোন',
+          text: ui.leave,
           style: 'destructive',
           onPress: () => {
             stopTimerFully();
@@ -329,15 +822,16 @@ export default function CookModeScreen() {
       const rawSpoken = prefix ? `${prefix}. ${currentStepText}` : currentStepText;
       const spoken = toBanglaDigits(rawSpoken);
       Speech.stop();
-      Speech.speak(spoken, { rate: 0.94, language: 'bn-BD' });
+      Speech.speak(spoken, { rate: 0.94, language: speechLocale });
     },
-    [audioPaused, currentStepText]
+    [audioPaused, currentStepText, speechLocale]
   );
 
   React.useEffect(() => {
     if (!handsFreeEnabled) return;
-    speakCurrentStep(`ধাপ ${toBanglaDigits(String(safeIndex + 1))}`);
-  }, [handsFreeEnabled, safeIndex, speakCurrentStep]);
+    const stepNumber = resolvedVoiceLanguage === 'বাংলা' ? toBanglaDigits(String(safeIndex + 1)) : String(safeIndex + 1);
+    speakCurrentStep(`${spokenStepPrefix} ${stepNumber}`);
+  }, [handsFreeEnabled, resolvedVoiceLanguage, safeIndex, speakCurrentStep, spokenStepPrefix]);
 
   const toggleAudioMute = React.useCallback(() => {
     setAudioPaused((prev) => {
@@ -352,25 +846,31 @@ export default function CookModeScreen() {
 
   const toggleHandsFreeListening = React.useCallback(() => {
     if (!speechRecognitionModule) {
-      setVoiceStatusText('Voice command unavailable here. Use dev build.');
+      setVoiceStatusText(ui.voiceUnavailable);
       return;
     }
     setHandsFreeEnabled((prev) => {
       if (prev) {
         speechRecognitionModule.stop();
         Speech.stop();
-        setVoiceStatusText('Voice command বন্ধ');
+        setVoiceStatusText(ui.voiceOff);
         return false;
       }
-      setVoiceStatusText('Voice command শুনছে: Chef ...');
+      setVoiceStatusText(ui.voiceListening);
       speechRecognitionModule.start({
-        lang: 'bn-BD',
+        lang: speechLocale,
         interimResults: true,
         continuous: true,
       });
       return true;
     });
-  }, [speechRecognitionModule]);
+  }, [speechRecognitionModule, speechLocale]);
+
+  const scrollByVoice = React.useCallback((delta: number) => {
+    const maxY = Math.max(0, scrollContentHeightRef.current - scrollViewportHeightRef.current);
+    const nextY = Math.min(maxY, Math.max(0, scrollYRef.current + delta));
+    scrollRef.current?.scrollTo({ y: nextY, animated: true });
+  }, []);
 
   const runVoiceCommand = React.useCallback(
     (command: VoiceCommand) => {
@@ -405,11 +905,35 @@ export default function CookModeScreen() {
         case 'stop_timer':
           stopTimerFully();
           break;
+        case 'start_step_timer': {
+          const mins = extractMinutesFromStep(currentStepText);
+          if (mins != null) {
+            startTimerSeconds(mins * 60, truncateLabel(currentStepText));
+            setVoiceStatusText(`${ui.timerStarted}: ${mins} ${ui.minutes.toLowerCase()}`);
+          } else {
+            setVoiceStatusText(ui.noStepTimeStatus);
+          }
+          break;
+        }
+        case 'scroll_up':
+          scrollByVoice(-240);
+          break;
+        case 'scroll_down':
+          scrollByVoice(240);
+          break;
+        case 'scroll_top':
+          scrollRef.current?.scrollTo({ y: 0, animated: true });
+          break;
+        case 'scroll_bottom': {
+          const maxY = Math.max(0, scrollContentHeightRef.current - scrollViewportHeightRef.current);
+          scrollRef.current?.scrollTo({ y: maxY, animated: true });
+          break;
+        }
         default:
           break;
       }
     },
-    [markCurrentDoneAndAdvance, speakCurrentStep, stepCount, stopTimerFully, timerStatus, togglePauseResume]
+    [currentStepText, markCurrentDoneAndAdvance, scrollByVoice, speakCurrentStep, stepCount, stopTimerFully, timerStatus, togglePauseResume]
   );
 
   React.useEffect(() => {
@@ -419,13 +943,12 @@ export default function CookModeScreen() {
       const transcript = event.results?.[0]?.transcript?.trim();
       if (!transcript) return;
 
-      setVoiceStatusText(`শুনলাম: ${transcript}`);
-
       const now = Date.now();
       if (now - lastVoiceCommandAtRef.current < 1200) return;
 
-      const command = parseVoiceCommand(transcript);
+      const command = parseVoiceCommand(transcript, resolvedVoiceLanguage);
       if (!command) return;
+      setVoiceStatusText(`${ui.heardPrefix}: ${transcript}`);
       lastVoiceTranscriptRef.current = transcript;
       lastVoiceCommandAtRef.current = now;
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -433,11 +956,11 @@ export default function CookModeScreen() {
     });
 
     const onError = speechRecognitionModule.addListener('error', () => {
-      setVoiceStatusText('Voice command reconnect হচ্ছে...');
+      setVoiceStatusText(ui.voiceReconnect);
       setTimeout(() => {
         if (!handsFreeEnabled) return;
         speechRecognitionModule.start({
-          lang: 'bn-BD',
+          lang: speechLocale,
           interimResults: true,
           continuous: true,
         });
@@ -445,16 +968,16 @@ export default function CookModeScreen() {
     });
 
     const onStart = speechRecognitionModule.addListener('start', () => {
-      setVoiceStatusText('Voice command শুনছে: Chef ...');
+      setVoiceStatusText(ui.voiceListening);
     });
 
     const onEnd = speechRecognitionModule.addListener('end', () => {
       if (!handsFreeEnabled) return;
-      setVoiceStatusText('Voice command restart হচ্ছে...');
+      setVoiceStatusText(ui.voiceRestart);
       setTimeout(() => {
         if (!handsFreeEnabled) return;
         speechRecognitionModule.start({
-          lang: 'bn-BD',
+          lang: speechLocale,
           interimResults: true,
           continuous: true,
         });
@@ -467,16 +990,16 @@ export default function CookModeScreen() {
       onStart?.remove();
       onEnd?.remove();
     };
-  }, [handsFreeEnabled, runVoiceCommand, speechRecognitionModule]);
+  }, [handsFreeEnabled, resolvedVoiceLanguage, runVoiceCommand, speechLocale, speechRecognitionModule]);
 
   React.useEffect(() => {
     let cancelled = false;
     Speech.getAvailableVoicesAsync()
       .then((voices) => {
         if (cancelled || !Array.isArray(voices)) return;
-        const matchBn = (v: Speech.Voice) => /^bn[-_]/i.test(v.language ?? '');
-        const hasBnVoice = voices.some(matchBn);
-        setBnVoiceMissing(!hasBnVoice);
+        const localePrefix = speechLocale.split('-')[0]?.toLowerCase();
+        const hasTargetVoice = voices.some((v) => (v.language ?? '').toLowerCase().startsWith(`${localePrefix}-`));
+        setBnVoiceMissing(!hasTargetVoice);
       })
       .catch(() => {
         if (!cancelled) setBnVoiceMissing(true);
@@ -484,7 +1007,7 @@ export default function CookModeScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [speechLocale]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -494,24 +1017,24 @@ export default function CookModeScreen() {
         if (cancelled) return;
         setSpeechRecognitionModule(mod);
         if (!mod) {
-          setVoiceStatusText('Voice command unavailable here. Use dev build.');
+          setVoiceStatusText(ui.voiceUnavailable);
           return;
         }
         const permission = await mod.requestPermissionsAsync();
         if (!permission.granted) {
-          setVoiceStatusText('Mic permission off - voice command বন্ধ');
+          setVoiceStatusText(ui.micPermissionOff);
           return;
         }
         if (cancelled) return;
         setHandsFreeEnabled(true);
-        setVoiceStatusText('Voice command শুনছে: Chef ...');
+        setVoiceStatusText(ui.voiceListening);
         mod.start({
-          lang: 'bn-BD',
+          lang: speechLocale,
           interimResults: true,
           continuous: true,
         });
       } catch {
-        setVoiceStatusText('Voice command unavailable (dev build needed)');
+        setVoiceStatusText(ui.voiceNeedsDevBuild);
       }
     };
     void setupHandsFree();
@@ -519,13 +1042,13 @@ export default function CookModeScreen() {
       cancelled = true;
       Speech.stop();
     };
-  }, []);
+  }, [speechLocale, ui]);
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingBox}>
-          <Text style={styles.loadingText}>লোড হচ্ছে…</Text>
+          <Text style={styles.loadingText}>{ui.loading}</Text>
         </View>
       </SafeAreaView>
     );
@@ -535,29 +1058,40 @@ export default function CookModeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.page}>
         <ScrollView
+          ref={scrollRef}
           style={{ flex: 1 }}
+          onLayout={(e) => {
+            scrollViewportHeightRef.current = e.nativeEvent.layout.height;
+          }}
+          onContentSizeChange={(_, h) => {
+            scrollContentHeightRef.current = h;
+          }}
+          onScroll={(e) => {
+            scrollYRef.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPad }]}>
           <TouchableOpacity style={styles.backBtn} onPress={handleBack} accessibilityRole="button">
-            <Text style={styles.backBtnText}>← ফিরে যান</Text>
+            <Text style={styles.backBtnText}>{ui.back}</Text>
           </TouchableOpacity>
 
-          <Text style={styles.screenTitle}>কুক মোড</Text>
+          <Text style={styles.screenTitle}>{ui.cookMode}</Text>
           <Text style={styles.dishTitle} numberOfLines={2}>
             {dishName}
           </Text>
 
           <Text style={styles.progressLine}>
-            ধাপ {safeIndex + 1} / {stepCount}
+            {ui.stepWord} {safeIndex + 1} / {stepCount}
           </Text>
           <View style={styles.voiceInfoCard}>
             <View style={styles.voiceInfoHeader}>
-              <Text style={styles.voiceInfoTitle}>Hands-free command</Text>
+              <Text style={styles.voiceInfoTitle}>{ui.handsFreeTitle}</Text>
               <View style={styles.voiceToggleRow}>
                 <TouchableOpacity
                   style={[styles.voiceIconBtn, audioPaused && styles.voiceIconBtnOff]}
                   onPress={toggleAudioMute}
                   accessibilityRole="button"
-                  accessibilityLabel={audioPaused ? 'অডিও চালু করুন' : 'অডিও বন্ধ করুন'}>
+                  accessibilityLabel={audioPaused ? ui.audioOnA11y : ui.audioOffA11y}>
                   <MaterialIcons
                     name={audioPaused ? 'volume-off' : 'volume-up'}
                     size={20}
@@ -568,7 +1102,7 @@ export default function CookModeScreen() {
                   style={[styles.voiceIconBtn, !handsFreeEnabled && styles.voiceIconBtnOff]}
                   onPress={toggleHandsFreeListening}
                   accessibilityRole="button"
-                  accessibilityLabel={handsFreeEnabled ? 'ভয়েস কমান্ড বন্ধ করুন' : 'ভয়েস কমান্ড চালু করুন'}>
+                  accessibilityLabel={handsFreeEnabled ? ui.voiceOffA11y : ui.voiceOnA11y}>
                   <MaterialIcons
                     name={handsFreeEnabled ? 'mic' : 'mic-off'}
                     size={20}
@@ -578,18 +1112,16 @@ export default function CookModeScreen() {
               </View>
             </View>
             <Text style={styles.voiceInfoText}>{voiceStatusText}</Text>
-            <Text style={styles.voiceInfoHint}>
-              বলুন: Chef next, Chef repeat, Chef pause, Chef resume, Chef done
-            </Text>
+            <Text style={styles.voiceInfoHint}>{voiceHintText}</Text>
           </View>
 
           {bnVoiceMissing ? (
             <View style={styles.bnVoiceBanner}>
               <MaterialIcons name="record-voice-over" size={18} color={GOLD} />
               <View style={styles.bnVoiceBannerBody}>
-                <Text style={styles.bnVoiceBannerTitle}>বাংলা TTS voice নেই</Text>
+                <Text style={styles.bnVoiceBannerTitle}>{ui.bnVoiceMissingTitle}</Text>
                 <Text style={styles.bnVoiceBannerText}>
-                  Recipe বাংলায় ঠিকঠাক পড়াতে বাংলা voice install করুন: Settings → General management → Text-to-speech output → Google → ⚙️ → Install voice data → Bengali (Bangladesh)।
+                  {ui.bnVoiceMissingBody}
                 </Text>
               </View>
             </View>
@@ -604,7 +1136,7 @@ export default function CookModeScreen() {
               style={[styles.secondaryBtn, safeIndex === 0 && styles.secondaryBtnDisabled]}
               disabled={safeIndex === 0}
               onPress={() => setCurrentIndex((i) => Math.max(0, i - 1))}>
-              <Text style={[styles.secondaryBtnText, safeIndex === 0 && styles.secondaryBtnTextDisabled]}>আগের ধাপ</Text>
+              <Text style={[styles.secondaryBtnText, safeIndex === 0 && styles.secondaryBtnTextDisabled]}>{ui.prevStep}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.secondaryBtn, safeIndex >= stepCount - 1 && styles.secondaryBtnDisabled]}
@@ -612,17 +1144,17 @@ export default function CookModeScreen() {
               onPress={() => setCurrentIndex((i) => Math.min(stepCount - 1, i + 1))}>
               <Text
                 style={[styles.secondaryBtnText, safeIndex >= stepCount - 1 && styles.secondaryBtnTextDisabled]}>
-                পরের ধাপ
+                {ui.nextStep}
               </Text>
             </TouchableOpacity>
           </View>
 
           <TouchableOpacity style={styles.donePrimary} onPress={markCurrentDoneAndAdvance} activeOpacity={0.85}>
             <MaterialIcons name="check-circle" size={22} color="#000" />
-            <Text style={styles.donePrimaryText}>এই ধাপ শেষ</Text>
+            <Text style={styles.donePrimaryText}>{ui.doneStep}</Text>
           </TouchableOpacity>
 
-          <Text style={styles.sectionLabel}>টাইমার</Text>
+          <Text style={styles.sectionLabel}>{ui.timer}</Text>
           <View style={styles.timerCard}>
             {suggestedMinutes != null ? (
               <TouchableOpacity
@@ -631,14 +1163,14 @@ export default function CookModeScreen() {
                   startTimerSeconds(suggestedMinutes * 60, truncateLabel(currentStepText))
                 }>
                 <MaterialIcons name="timer" size={20} color="#000" />
-                <Text style={styles.suggestBtnText}>{suggestedMinutes} মিনিট শুরু</Text>
+                <Text style={styles.suggestBtnText}>{suggestedMinutes} {ui.minutes} {ui.start}</Text>
               </TouchableOpacity>
             ) : (
-              <Text style={styles.suggestHint}>এই ধাপে সময় উল্লেখ নেই—নিচে মিনিট লিখে শুরু করুন।</Text>
+              <Text style={styles.suggestHint}>{ui.noStepTime}</Text>
             )}
 
             <View style={styles.customRow}>
-              <Text style={styles.customLabel}>মিনিট</Text>
+              <Text style={styles.customLabel}>{ui.minutes}</Text>
               <TextInput
                 value={customMinutes}
                 onChangeText={setCustomMinutes}
@@ -654,7 +1186,7 @@ export default function CookModeScreen() {
                   if (m == null) return;
                   startTimerSeconds(m * 60, truncateLabel(currentStepText));
                 }}>
-                <Text style={styles.customStartText}>শুরু</Text>
+                <Text style={styles.customStartText}>{ui.start}</Text>
               </TouchableOpacity>
             </View>
 
@@ -670,7 +1202,7 @@ export default function CookModeScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionLabel}>চেকলিস্ট</Text>
+          <Text style={styles.sectionLabel}>{ui.checklist}</Text>
           <View style={styles.checklist}>
             {steps.map((line, i) => {
               const isCurrent = i === safeIndex;
@@ -707,9 +1239,9 @@ export default function CookModeScreen() {
             {finishedBanner ? (
               <View style={styles.timerStickyInner}>
                 <MaterialIcons name="notifications-active" size={22} color={GOLD} />
-                <Text style={styles.timerStickyTitle}>সময় শেষ</Text>
+                <Text style={styles.timerStickyTitle}>{ui.timeUp}</Text>
                 <TouchableOpacity style={styles.timerStickyDismiss} onPress={stopTimerFully}>
-                  <Text style={styles.timerStickyDismissText}>বন্ধ</Text>
+                  <Text style={styles.timerStickyDismissText}>{ui.close}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
