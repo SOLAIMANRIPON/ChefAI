@@ -78,22 +78,43 @@ async function resolveSpeechRecognitionModule(): Promise<SpeechRecognitionModule
   }
 }
 
-function parseVoiceCommand(raw: string): VoiceCommand {
-  const text = raw.toLowerCase().trim();
-  const hasWakeWord = /(chef|শেফ)/i.test(text);
-  if (!hasWakeWord) return null;
-  const body = text.replace(/chef|শেফ/gi, ' ').replace(/\s+/g, ' ').trim();
+const BANGLA_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
 
+function toBanglaDigits(input: string): string {
+  return input.replace(/\d/g, (d) => BANGLA_DIGITS[Number(d)] ?? d);
+}
+
+function stripBengaliNukta(input: string): string {
+  return input
+    .normalize('NFC')
+    .replace(/\u09DF/g, '\u09AF') // য় -> য
+    .replace(/\u09DC/g, '\u09A1') // ড় -> ড
+    .replace(/\u09DD/g, '\u09A2') // ঢ় -> ঢ
+    .replace(/\u09BC/g, ''); // combining nukta -> remove
+}
+
+const WAKE_WORD_RE = /chef|chif|sef|শেফ|সেফ|চেফ|শেপ|সেপ|শেষ|সেস|শাফ|সাফ|শ্যাফ|স্যাফ|চিফ|সিফ|শিফ|সিপ|শিপ/gi;
+
+function parseVoiceCommand(raw: string): VoiceCommand {
+  const text = stripBengaliNukta(raw.toLowerCase().trim());
+  WAKE_WORD_RE.lastIndex = 0;
+  if (!WAKE_WORD_RE.test(text)) return null;
+  const body = text.replace(WAKE_WORD_RE, ' ').replace(/\s+/g, ' ').trim();
   if (!body) return null;
-  if (/(next|পরের)/i.test(body)) return 'next';
-  if (/(previous|আগের)/i.test(body)) return 'previous';
-  if (/(repeat|আবার|পুনরায়)/i.test(body)) return 'repeat';
-  if (/(pause audio|pause reading|থামো|চুপ)/i.test(body)) return 'pause_audio';
-  if (/(resume audio|resume reading|চালাও|আবার চালাও)/i.test(body)) return 'resume_audio';
-  if (/(done|completed|শেষ|সম্পন্ন)/i.test(body)) return 'mark_done';
-  if (/(pause timer|টাইমার থামাও)/i.test(body)) return 'pause_timer';
-  if (/(resume timer|টাইমার চালাও)/i.test(body)) return 'resume_timer';
-  if (/(stop timer|টাইমার বন্ধ)/i.test(body)) return 'stop_timer';
+
+  const hasTimerWord = /timer|টাইমার|টাইমা/i.test(body);
+  if (hasTimerWord) {
+    if (/pause|paus|pose|পজ|থামাও|থামো/i.test(body)) return 'pause_timer';
+    if (/resume|রিজিউম|চালাও/i.test(body)) return 'resume_timer';
+    if (/stop|স্টপ|বন্ধ/i.test(body)) return 'stop_timer';
+  }
+
+  if (/next|nxt|নেক্সট|নেক্ষ্ট|নেস্ট|নেক্স|পরের|পরবর্তী|আগাও|এগোও/i.test(body)) return 'next';
+  if (/previous|prev|back|প্রিভিযাস|প্রিবিযাস|প্রিভিযেস|প্রিভিউস|প্রিভাস|প্রিবাস|প্রেভ|ব্যাক|বেক|আগের|পূর্ব|পেছনে|পিছনে/i.test(body)) return 'previous';
+  if (/repeat|again|রিপিট|রিপীট|আবার|পুনরায/i.test(body)) return 'repeat';
+  if (/pause|paus|pose|পজ|থামো|চুপ/i.test(body)) return 'pause_audio';
+  if (/resume|রিজিউম|চালাও/i.test(body)) return 'resume_audio';
+  if (/done|complete|completed|ডান|শেষ করো|শেষ করুন|শেষ হযেছে|হযে গেছে|সম্পন্ন/i.test(body)) return 'mark_done';
   return null;
 }
 
@@ -115,6 +136,8 @@ export default function CookModeScreen() {
   const [handsFreeEnabled, setHandsFreeEnabled] = React.useState(false);
   const [voiceStatusText, setVoiceStatusText] = React.useState('Voice চলছে না');
   const [speechRecognitionModule, setSpeechRecognitionModule] = React.useState<SpeechRecognitionModuleLike | null>(null);
+  const [bnVoiceIdentifier, setBnVoiceIdentifier] = React.useState<string | null>(null);
+  const [bnVoiceMissing, setBnVoiceMissing] = React.useState(false);
 
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const scheduledNotificationIdRef = React.useRef<string | null>(null);
@@ -303,20 +326,53 @@ export default function CookModeScreen() {
   const speakCurrentStep = React.useCallback(
     (prefix?: string) => {
       if (audioPaused || !currentStepText.trim()) return;
-      const spoken = prefix ? `${prefix}. ${currentStepText}` : currentStepText;
+      const rawSpoken = prefix ? `${prefix}. ${currentStepText}` : currentStepText;
+      const spoken = toBanglaDigits(rawSpoken);
       Speech.stop();
-      Speech.speak(spoken, {
-        language: 'bn-BD',
-        rate: 0.94,
-      });
+      const speakOptions: Speech.SpeechOptions = { rate: 0.94, language: 'bn-BD' };
+      if (bnVoiceIdentifier) speakOptions.voice = bnVoiceIdentifier;
+      Speech.speak(spoken, speakOptions);
     },
-    [audioPaused, currentStepText]
+    [audioPaused, currentStepText, bnVoiceIdentifier]
   );
 
   React.useEffect(() => {
     if (!handsFreeEnabled) return;
-    speakCurrentStep(`ধাপ ${safeIndex + 1}`);
+    speakCurrentStep(`ধাপ ${toBanglaDigits(String(safeIndex + 1))}`);
   }, [handsFreeEnabled, safeIndex, speakCurrentStep]);
+
+  const toggleAudioMute = React.useCallback(() => {
+    setAudioPaused((prev) => {
+      if (prev) {
+        setTimeout(() => speakCurrentStep(), 80);
+        return false;
+      }
+      Speech.stop();
+      return true;
+    });
+  }, [speakCurrentStep]);
+
+  const toggleHandsFreeListening = React.useCallback(() => {
+    if (!speechRecognitionModule) {
+      setVoiceStatusText('Voice command unavailable here. Use dev build.');
+      return;
+    }
+    setHandsFreeEnabled((prev) => {
+      if (prev) {
+        speechRecognitionModule.stop();
+        Speech.stop();
+        setVoiceStatusText('Voice command বন্ধ');
+        return false;
+      }
+      setVoiceStatusText('Voice command শুনছে: Chef ...');
+      speechRecognitionModule.start({
+        lang: 'bn-BD',
+        interimResults: true,
+        continuous: true,
+      });
+      return true;
+    });
+  }, [speechRecognitionModule]);
 
   const runVoiceCommand = React.useCallback(
     (command: VoiceCommand) => {
@@ -364,15 +420,17 @@ export default function CookModeScreen() {
     const onResult = speechRecognitionModule.addListener('result', (event: SpeechRecognitionResultEvent) => {
       const transcript = event.results?.[0]?.transcript?.trim();
       if (!transcript) return;
-      if (transcript === lastVoiceTranscriptRef.current) return;
+
+      setVoiceStatusText(`শুনলাম: ${transcript}`);
 
       const now = Date.now();
-      if (now - lastVoiceCommandAtRef.current < 900) return;
+      if (now - lastVoiceCommandAtRef.current < 1200) return;
 
       const command = parseVoiceCommand(transcript);
       if (!command) return;
       lastVoiceTranscriptRef.current = transcript;
       lastVoiceCommandAtRef.current = now;
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       runVoiceCommand(command);
     });
 
@@ -412,6 +470,32 @@ export default function CookModeScreen() {
       onEnd?.remove();
     };
   }, [handsFreeEnabled, runVoiceCommand, speechRecognitionModule]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    Speech.getAvailableVoicesAsync()
+      .then((voices) => {
+        if (cancelled || !Array.isArray(voices)) return;
+        const matchBn = (v: Speech.Voice) => /^bn[-_]/i.test(v.language ?? '');
+        const bnBD = voices.find((v) => /^bn[-_]bd$/i.test(v.language ?? ''));
+        const bnIN = voices.find((v) => /^bn[-_]in$/i.test(v.language ?? ''));
+        const bnAny = voices.find(matchBn);
+        const picked = bnBD ?? bnIN ?? bnAny ?? null;
+        if (picked?.identifier) {
+          setBnVoiceIdentifier(picked.identifier);
+          setBnVoiceMissing(false);
+        } else {
+          setBnVoiceIdentifier(null);
+          setBnVoiceMissing(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setBnVoiceMissing(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -477,12 +561,50 @@ export default function CookModeScreen() {
             ধাপ {safeIndex + 1} / {stepCount}
           </Text>
           <View style={styles.voiceInfoCard}>
-            <Text style={styles.voiceInfoTitle}>Hands-free command</Text>
+            <View style={styles.voiceInfoHeader}>
+              <Text style={styles.voiceInfoTitle}>Hands-free command</Text>
+              <View style={styles.voiceToggleRow}>
+                <TouchableOpacity
+                  style={[styles.voiceIconBtn, audioPaused && styles.voiceIconBtnOff]}
+                  onPress={toggleAudioMute}
+                  accessibilityRole="button"
+                  accessibilityLabel={audioPaused ? 'অডিও চালু করুন' : 'অডিও বন্ধ করুন'}>
+                  <MaterialIcons
+                    name={audioPaused ? 'volume-off' : 'volume-up'}
+                    size={20}
+                    color={audioPaused ? '#888' : GOLD}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.voiceIconBtn, !handsFreeEnabled && styles.voiceIconBtnOff]}
+                  onPress={toggleHandsFreeListening}
+                  accessibilityRole="button"
+                  accessibilityLabel={handsFreeEnabled ? 'ভয়েস কমান্ড বন্ধ করুন' : 'ভয়েস কমান্ড চালু করুন'}>
+                  <MaterialIcons
+                    name={handsFreeEnabled ? 'mic' : 'mic-off'}
+                    size={20}
+                    color={handsFreeEnabled ? GOLD : '#888'}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
             <Text style={styles.voiceInfoText}>{voiceStatusText}</Text>
             <Text style={styles.voiceInfoHint}>
               বলুন: Chef next, Chef repeat, Chef pause, Chef resume, Chef done
             </Text>
           </View>
+
+          {bnVoiceMissing ? (
+            <View style={styles.bnVoiceBanner}>
+              <MaterialIcons name="record-voice-over" size={18} color={GOLD} />
+              <View style={styles.bnVoiceBannerBody}>
+                <Text style={styles.bnVoiceBannerTitle}>বাংলা TTS voice নেই</Text>
+                <Text style={styles.bnVoiceBannerText}>
+                  Recipe বাংলায় ঠিকঠাক পড়াতে বাংলা voice install করুন: Settings → General management → Text-to-speech output → Google → ⚙️ → Install voice data → Bengali (Bangladesh)।
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.stepCard}>
             <Text style={styles.stepBody}>{currentStepText}</Text>
@@ -654,9 +776,50 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
   },
-  voiceInfoTitle: { color: GOLD, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 },
+  voiceInfoTitle: { color: GOLD, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  voiceInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  voiceToggleRow: { flexDirection: 'row', gap: 8 },
+  voiceIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: GOLD,
+    backgroundColor: '#181818',
+  },
+  voiceIconBtnOff: {
+    borderColor: '#444',
+    backgroundColor: '#0a0a0a',
+  },
   voiceInfoText: { color: '#ddd', fontSize: 12, marginBottom: 6 },
   voiceInfoHint: { color: '#999', fontSize: 12, lineHeight: 18 },
+  bnVoiceBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#1a1304',
+    borderWidth: 1,
+    borderColor: GOLD,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  bnVoiceBannerBody: { flex: 1 },
+  bnVoiceBannerTitle: {
+    color: GOLD,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  bnVoiceBannerText: { color: '#ddd', fontSize: 12, lineHeight: 18 },
   stepCard: {
     backgroundColor: '#111',
     borderRadius: 16,
