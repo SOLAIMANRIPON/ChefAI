@@ -93,6 +93,7 @@ function stripBengaliNukta(input: string): string {
     .replace(/\u09BC/g, ''); // combining nukta -> remove
 }
 
+
 const WAKE_WORD_RE = /chef|chif|sef|শেফ|সেফ|চেফ|শেপ|সেপ|শেষ|সেস|শাফ|সাফ|শ্যাফ|স্যাফ|চিফ|সিফ|শিফ|সিপ|শিপ/gi;
 
 function parseVoiceCommand(raw: string): VoiceCommand {
@@ -136,7 +137,6 @@ export default function CookModeScreen() {
   const [handsFreeEnabled, setHandsFreeEnabled] = React.useState(false);
   const [voiceStatusText, setVoiceStatusText] = React.useState('Voice চলছে না');
   const [speechRecognitionModule, setSpeechRecognitionModule] = React.useState<SpeechRecognitionModuleLike | null>(null);
-  const [bnVoiceIdentifier, setBnVoiceIdentifier] = React.useState<string | null>(null);
   const [bnVoiceMissing, setBnVoiceMissing] = React.useState(false);
 
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -329,11 +329,9 @@ export default function CookModeScreen() {
       const rawSpoken = prefix ? `${prefix}. ${currentStepText}` : currentStepText;
       const spoken = toBanglaDigits(rawSpoken);
       Speech.stop();
-      const speakOptions: Speech.SpeechOptions = { rate: 0.94, language: 'bn-BD' };
-      if (bnVoiceIdentifier) speakOptions.voice = bnVoiceIdentifier;
-      Speech.speak(spoken, speakOptions);
+      Speech.speak(spoken, { rate: 0.94, language: 'bn-BD' });
     },
-    [audioPaused, currentStepText, bnVoiceIdentifier]
+    [audioPaused, currentStepText]
   );
 
   React.useEffect(() => {
@@ -477,17 +475,8 @@ export default function CookModeScreen() {
       .then((voices) => {
         if (cancelled || !Array.isArray(voices)) return;
         const matchBn = (v: Speech.Voice) => /^bn[-_]/i.test(v.language ?? '');
-        const bnBD = voices.find((v) => /^bn[-_]bd$/i.test(v.language ?? ''));
-        const bnIN = voices.find((v) => /^bn[-_]in$/i.test(v.language ?? ''));
-        const bnAny = voices.find(matchBn);
-        const picked = bnBD ?? bnIN ?? bnAny ?? null;
-        if (picked?.identifier) {
-          setBnVoiceIdentifier(picked.identifier);
-          setBnVoiceMissing(false);
-        } else {
-          setBnVoiceIdentifier(null);
-          setBnVoiceMissing(true);
-        }
+        const hasBnVoice = voices.some(matchBn);
+        setBnVoiceMissing(!hasBnVoice);
       })
       .catch(() => {
         if (!cancelled) setBnVoiceMissing(true);
