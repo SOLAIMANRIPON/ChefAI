@@ -1,0 +1,55 @@
+---
+description: ChefAI server resilience — Gemini timeout, retry, logging, degraded flag
+globs: server/**/*.js
+alwaysApply: false
+---
+
+# ChefAI Backend (Gemini)
+
+## Generation
+
+- Read model from `GEMINI_TEXT_MODEL` env. Current default:
+  `gemini-3-flash-preview` (Flash Preview gives recipe quality + speed; Flash
+  Lite was too slow for Bangla structured-JSON prompts).
+- `generateText(prompt, timeoutMs = 60000)` — 60s base; per-attempt budget
+  grows ×1.25 each retry; `maxAttempts = 2`.
+- Retry on **timeout AND 503 overload**.
+- Hard-fail (no retry, return null) on 404 model-not-found, 401/403 auth,
+  429 quota/billing.
+- Always log every failure with model name, attempt N/M, and message:
+  ```js
+  console.error(
+    `[generateText] attempt ${a}/${m} failed (model=${MODEL}, ...): ${msg}`
+  );
+  ```
+  Never let a Gemini failure go silent — silent fallbacks caused the
+  "3 fake steps for every recipe" bug we hit on 2026-05-08.
+
+## Fallback responses
+
+When `generateText` returns null and we serve placeholder content, the
+response MUST include `degraded: true` AND use HTTP 503:
+
+```js
+return res.status(503).json({
+  degraded: true,
+  message: 'Recipe generator is temporarily unavailable. Please try again.',
+  // …placeholder fields for graceful client handling…
+});
+```
+
+The client (`app/recipe-details.tsx`) checks `data.degraded === true` and
+throws — this prevents generic content from being saved or displayed.
+
+## Structured recipe contract
+
+`/api/v1/ai/recipes/details` returns:
+
+```
+{ dishName, recipe, ingredients: string[], steps: string[],
+  tips: string[], yieldServings, imageUrl, nutritionEstimate }
+```
+
+Keep `recipe` (joined string) for backward compatibility, but the arrays are
+the canonical source. Helpers live in `lib/recipe-structured.ts` and
+`server/index.js` mirror functions.

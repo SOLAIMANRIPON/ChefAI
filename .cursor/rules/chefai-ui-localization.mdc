@@ -1,0 +1,47 @@
+---
+description: ChefAI UI localization rule — default English, switch only on recipe language
+alwaysApply: true
+---
+
+# ChefAI UI Localization
+
+**Project rule (explicit user instruction):** UI text defaults to **English**.
+Switch to another language ONLY when the user explicitly selects another
+language OR opens a recipe whose `language` field is non-English.
+
+Hub / list / home screens have no recipe context, so they MUST stay English
+even when the user previously opened a Bangla recipe.
+
+## Pattern (matches `app/cook-mode.tsx` and `app/shopping-list.tsx`)
+
+Define a `<ScreenName>Ui` type, an `EN_<NAME>_UI` default, and a
+`Record<string, ...>` map keyed by language strings from
+`constants/language-alias.ts`. Resolve via `resolveUiLanguageKey`:
+
+```tsx
+import { resolveUiLanguageKey } from '@/constants/language-alias';
+
+type ShoppingUi = { back: string; regenerate: string; /* ... */ };
+
+const EN_SHOPPING_UI: ShoppingUi = {
+  back: 'Back',
+  regenerate: 'Regenerate list',
+};
+
+const SHOPPING_UI_TEXT: Record<string, ShoppingUi> = {
+  বাংলা: { back: 'ফিরে যান', regenerate: 'লিস্ট আবার তৈরি করুন' },
+  English: EN_SHOPPING_UI,
+  Hindi: EN_SHOPPING_UI,
+  Urdu: EN_SHOPPING_UI,
+  // …every other language falls back to EN_SHOPPING_UI for now
+};
+
+const ui = SHOPPING_UI_TEXT[resolveUiLanguageKey(language)] ?? EN_SHOPPING_UI;
+```
+
+## Anti-patterns
+
+- Hard-coding Bangla strings without an English fallback
+- Showing Bangla labels on hub / list screens that have no recipe context
+- Using a global locale toggle — locale derives from the active recipe, not
+  from a user preference

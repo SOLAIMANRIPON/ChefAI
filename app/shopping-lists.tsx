@@ -50,8 +50,8 @@ export default function ShoppingListsHubScreen() {
 
         <Text style={styles.title}>Shopping Lists</Text>
         <Text style={styles.blurb}>
-          পছন্দের সেভ করা রেসিপি বেছে নিন—প্রয়োজনীয় উপকরণের ডিজিটাল লিস্ট স্বয়ংক্রিয়ভাবে তৈরি হবে। বাজারে কিনে
-          ফেললে লিস্টে টিক দিয়ে ট্র্যাক করুন।
+          Pick a saved recipe to auto-generate a digital shopping list. Tap items as you buy
+          them to keep track.
         </Text>
 
         {loading ? (
@@ -59,10 +59,10 @@ export default function ShoppingListsHubScreen() {
             <ActivityIndicator color="#d3b275" />
           </View>
         ) : saved.length === 0 ? (
-          <Text style={styles.empty}>এখনও কোনো রেসিপি সেভ করা নেই। রেসিপি ডিটেইলস থেকে সেভ করুন।</Text>
+          <Text style={styles.empty}>No saved recipes yet. Save one from the recipe details screen.</Text>
         ) : (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>সেভ করা রেসিপি — শপিং লিস্ট খুলুন</Text>
+            <Text style={styles.sectionTitle}>Saved recipes — open shopping list</Text>
             {saved.map((item) => (
               <TouchableOpacity
                 key={item.id}

@@ -108,6 +108,39 @@ function toBanglaDigits(input: string): string {
   return input.replace(/\d/g, (d) => BANGLA_DIGITS[Number(d)] ?? d);
 }
 
+/**
+ * Make recipe text safer for the OS TTS engine.
+ *
+ * 1. Numeric ranges like `5-6 মিনিট` / `5 – 6 cups` → `5 থেকে 6` (Bangla) /
+ *    `5 to 6` (others). Without this, TTS pronounces the hyphen literally as
+ *    "minus" (e.g. "পাঁচ মাইনাস ছয়" instead of "পাঁচ থেকে ছয়").
+ * 2. `1/4` / `1 / 4` → `1 of 4` (Bangla) / `1 over 4` (others) so the slash isn't
+ *    skipped or mumbled. Most TTS engines will otherwise drop fraction numerators
+ *    /denominators silently when there's no whitespace around the slash.
+ * 3. Convert ASCII digits → Bangla numerals only when the spoken locale is Bangla;
+ *    otherwise English / Hindi / Arabic / etc. TTS engines see foreign glyphs and
+ *    silently drop the numbers (the bug behind: "১.৫ lbs flank steak" → "lbs flank
+ *    steak").
+ *
+ * Both range and fraction regexes accept ASCII (`0-9`) and Bangla (`০-৯`) digits
+ * because real recipes mix the two depending on the LLM output language.
+ */
+function normalizeStepForSpeech(input: string, uiLanguage: string): string {
+  const isBangla = uiLanguage === 'বাংলা';
+  const fractionJoiner = isBangla ? ' এর ' : ' over ';
+  const rangeJoiner = isBangla ? ' থেকে ' : ' to ';
+  const withRanges = input.replace(
+    /([\d০-৯])\s*[-–—−]+\s*([\d০-৯])/g,
+    `$1${rangeJoiner}$2`
+  );
+  const withFractions = withRanges.replace(
+    /([\d০-৯])\s*\/\s*([\d০-৯])/g,
+    `$1${fractionJoiner}$2`
+  );
+  if (isBangla) return toBanglaDigits(withFractions);
+  return withFractions;
+}
+
 function stripBengaliNukta(input: string): string {
   return input
     .normalize('NFC')
@@ -699,15 +732,24 @@ export default function CookModeScreen() {
     let cancelled = false;
     loadCookModeSession().then((session) => {
       if (cancelled) return;
-      if (!session?.recipe?.trim()) {
+      const hasStructuredSteps = Array.isArray(session?.steps) && (session?.steps?.length ?? 0) > 0;
+      if (!session?.recipe?.trim() && !hasStructuredSteps) {
         router.back();
         return;
       }
-      const parsed = parseRecipeSteps(session.recipe);
-      setDishName(session.dishName?.trim() || 'Recipe');
-      setRecipeLanguage(resolveUiLanguageKey(session.language?.trim() || 'English'));
-      setSteps(parsed.length ? parsed : [session.recipe.trim()]);
-      setDone(parsed.map(() => false));
+      // Structured-first: when the backend gave us pre-split steps (the new
+      // contract), use them directly. Heuristic parsing of `recipe` is only the
+      // fallback for legacy sessions / pre-update saved recipes.
+      const finalSteps = hasStructuredSteps
+        ? (session!.steps as string[])
+        : (() => {
+            const parsed = parseRecipeSteps(session!.recipe);
+            return parsed.length ? parsed : [session!.recipe.trim()];
+          })();
+      setDishName(session!.dishName?.trim() || 'Recipe');
+      setRecipeLanguage(resolveUiLanguageKey(session!.language?.trim() || 'English'));
+      setSteps(finalSteps);
+      setDone(finalSteps.map(() => false));
       setLoading(false);
     });
     return () => {
@@ -896,11 +938,11 @@ export default function CookModeScreen() {
     (prefix?: string) => {
       if (audioPaused || !currentStepText.trim()) return;
       const rawSpoken = prefix ? `${prefix}. ${currentStepText}` : currentStepText;
-      const spoken = toBanglaDigits(rawSpoken);
+      const spoken = normalizeStepForSpeech(rawSpoken, resolvedVoiceLanguage);
       Speech.stop();
       Speech.speak(spoken, { rate: 0.94, language: speechLocale });
     },
-    [audioPaused, currentStepText, speechLocale]
+    [audioPaused, currentStepText, resolvedVoiceLanguage, speechLocale]
   );
 
   React.useEffect(() => {

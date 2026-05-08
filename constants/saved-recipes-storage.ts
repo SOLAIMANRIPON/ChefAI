@@ -47,6 +47,15 @@ export type StoredSavedRecipe = {
   nutritionCaloriesKcal?: string;
   nutritionProteinG?: string;
   nutritionCarbsG?: string;
+  /**
+   * Structured arrays produced by the backend's structured-recipe contract.
+   * Preferred by Cook Mode and Shopping List over heuristic parsing of `recipe`.
+   * Optional so legacy rows saved before this contract still load.
+   */
+  ingredientsList?: string[];
+  steps?: string[];
+  tips?: string[];
+  yieldServings?: string;
   savedAt: string;
 };
 
@@ -57,6 +66,26 @@ type RecipeMetaStored = Omit<StoredSavedRecipe, 'recipe'> & {
 function clip(s: string | undefined, max: number): string | undefined {
   if (s == null) return s;
   return s.length <= max ? s : s.slice(0, max);
+}
+
+const MAX_INGREDIENTS_ARR = 50;
+const MAX_STEPS_ARR = 30;
+const MAX_TIPS_ARR = 20;
+const MAX_INGREDIENT_ITEM_CHARS = 600;
+const MAX_STEP_ITEM_CHARS = 1500;
+const MAX_TIP_ITEM_CHARS = 600;
+
+function clipStringArray(value: string[] | undefined, maxItems: number, maxChars: number): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: string[] = [];
+  for (const v of value) {
+    if (typeof v !== 'string') continue;
+    const t = v.trim();
+    if (!t) continue;
+    out.push(t.length <= maxChars ? t : t.slice(0, maxChars));
+    if (out.length >= maxItems) break;
+  }
+  return out.length ? out : undefined;
 }
 
 function narrowMetaFields(rest: Omit<StoredSavedRecipe, 'recipe'>): Omit<StoredSavedRecipe, 'recipe'> {
@@ -80,6 +109,10 @@ function narrowMetaFields(rest: Omit<StoredSavedRecipe, 'recipe'>): Omit<StoredS
     nutritionCaloriesKcal: clip(rest.nutritionCaloriesKcal, MAX_MISC_STRING_LEN),
     nutritionProteinG: clip(rest.nutritionProteinG, MAX_MISC_STRING_LEN),
     nutritionCarbsG: clip(rest.nutritionCarbsG, MAX_MISC_STRING_LEN),
+    ingredientsList: clipStringArray(rest.ingredientsList, MAX_INGREDIENTS_ARR, MAX_INGREDIENT_ITEM_CHARS),
+    steps: clipStringArray(rest.steps, MAX_STEPS_ARR, MAX_STEP_ITEM_CHARS),
+    tips: clipStringArray(rest.tips, MAX_TIPS_ARR, MAX_TIP_ITEM_CHARS),
+    yieldServings: clip(rest.yieldServings, MAX_MISC_STRING_LEN),
     savedAt: rest.savedAt.slice(0, MAX_MISC_STRING_LEN),
   };
 }

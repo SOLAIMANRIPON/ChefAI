@@ -1,5 +1,6 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
+import { resolveUiLanguageKey } from '@/constants/language-alias';
 import {
   mergeShoppingItemsToIngredientNames,
   normalizeShoppingIngredientLabels,
@@ -47,7 +48,8 @@ async function fetchShoppingItemsFromApi(
   recipeText: string,
   dishName: string,
   language: string,
-  servings: number
+  servings: number,
+  ingredients?: string[]
 ): Promise<string[]> {
   if (!API_BASE_URL) return [];
   try {
@@ -61,6 +63,7 @@ async function fetchShoppingItemsFromApi(
           dishName,
           language,
           servings,
+          ...(ingredients && ingredients.length ? { ingredients } : {}),
         }),
       },
       45000
@@ -73,6 +76,85 @@ async function fetchShoppingItemsFromApi(
   } catch {
     return [];
   }
+}
+
+type ShoppingUi = {
+  back: string;
+  fallbackTitle: string;
+  remainingOf: (remaining: number, total: number) => string;
+  regenerate: string;
+  fallbackNote: string;
+  generating: string;
+  loading: string;
+  errorNoRecipeId: string;
+  errorRecipeNotFound: string;
+  errorEmptyRecipe: string;
+  errorLoadFailed: string;
+  errorNoRecipeText: string;
+  errorListBuildServer: string;
+  errorListBuildNoApiBase: string;
+  emptyItems: string;
+};
+
+const EN_SHOPPING_UI: ShoppingUi = {
+  back: 'Back',
+  fallbackTitle: 'Shopping list',
+  remainingOf: (remaining, total) => `Remaining ${remaining} / Total ${total}`,
+  regenerate: 'Regenerate list',
+  fallbackNote:
+    'Server list unavailable — auto-extracted a short list from the recipe text. Deploy the latest backend for more accurate results.',
+  generating: 'Building ingredient list…',
+  loading: 'Loading…',
+  errorNoRecipeId: 'Recipe id missing.',
+  errorRecipeNotFound: 'Recipe not found. Please pick a saved recipe first.',
+  errorEmptyRecipe: 'Recipe is empty — cannot build a shopping list.',
+  errorLoadFailed: 'Failed to load.',
+  errorNoRecipeText: 'No recipe text available.',
+  errorListBuildServer:
+    'Could not build the list. Update the backend, or make sure the recipe lists ingredients with quantities.',
+  errorListBuildNoApiBase:
+    'Could not build the list. Set EXPO_PUBLIC_API_BASE_URL or provide more recipe text.',
+  emptyItems: 'No items.',
+};
+
+const SHOPPING_UI_TEXT: Record<string, ShoppingUi> = {
+  বাংলা: {
+    back: 'ফিরে যান',
+    fallbackTitle: 'শপিং লিস্ট',
+    remainingOf: (remaining, total) => `বাকি ${remaining} / মোট ${total}`,
+    regenerate: 'লিস্ট আবার তৈরি করুন',
+    fallbackNote:
+      'সার্ভার লিস্ট unavailable — রেসিপি টেক্সট থেকে স্বয়ংক্রিয় সংক্ষিপ্ত লিস্ট। নতুন সার্ভার ডিপ্লয় করলে আরও নির্ভুল হবে।',
+    generating: 'উপকরণের লিস্ট তৈরি হচ্ছে…',
+    loading: 'লোড হচ্ছে…',
+    errorNoRecipeId: 'রেসিপি আইডি নেই।',
+    errorRecipeNotFound: 'রেসিপি পাওয়া যায়নি। আগে সেভ করা রেসিপি বেছে নিন।',
+    errorEmptyRecipe: 'রেসিপি টেক্সট খালি—শপিং লিস্ট বানানো যাবে না।',
+    errorLoadFailed: 'লোড করা যায়নি।',
+    errorNoRecipeText: 'রেসিপি টেক্সট নেই।',
+    errorListBuildServer:
+      'লিস্ট তৈরি করা গেল না। সার্ভার আপডেট করুন অথবা রেসিপিতে উপকরণ/পরিমাণ স্পষ্ট থাকা প্রয়োজন।',
+    errorListBuildNoApiBase:
+      'লিস্ট তৈরি করা গেল না। EXPO_PUBLIC_API_BASE_URL সেট করুন অথবা রেসিপি টেক্সট পর্যাপ্ত নয়।',
+    emptyItems: 'কোনো আইটেম নেই।',
+  },
+  English: EN_SHOPPING_UI,
+  Hindi: EN_SHOPPING_UI,
+  Arabic: EN_SHOPPING_UI,
+  French: EN_SHOPPING_UI,
+  Spanish: EN_SHOPPING_UI,
+  Urdu: EN_SHOPPING_UI,
+  Japanese: EN_SHOPPING_UI,
+  Chinese: EN_SHOPPING_UI,
+  Korean: EN_SHOPPING_UI,
+  Turkish: EN_SHOPPING_UI,
+  Persian: EN_SHOPPING_UI,
+  Greek: EN_SHOPPING_UI,
+  Portuguese: EN_SHOPPING_UI,
+};
+
+function resolveShoppingUi(language: string): ShoppingUi {
+  return SHOPPING_UI_TEXT[resolveUiLanguageKey(language)] ?? EN_SHOPPING_UI;
 }
 
 export default function ShoppingListScreen() {
@@ -89,6 +171,9 @@ export default function ShoppingListScreen() {
   const [language, setLanguage] = React.useState('English');
   const [fallbackNote, setFallbackNote] = React.useState(false);
   const [recipeServings, setRecipeServings] = React.useState(4);
+  const [structuredIngredients, setStructuredIngredients] = React.useState<string[]>([]);
+
+  const ui = React.useMemo(() => resolveShoppingUi(language), [language]);
 
   const reloadFromStorage = React.useCallback(async (rid: string, name: string) => {
     const stored = await getShoppingList(rid);
@@ -107,22 +192,27 @@ export default function ShoppingListScreen() {
     name: string,
     body: string,
     lang: string,
-    servings: number
+    servings: number,
+    ingredientsArr?: string[]
   ) => {
     setGenerating(true);
     setError('');
     setFallbackNote(false);
+    // Resolve UI strings from the recipe's language so error toasts in this
+    // callback match the recipe context (the `ui` from React state may lag if
+    // generateAndStore is invoked before the language state has settled).
+    const callbackUi = resolveShoppingUi(lang);
     try {
-      const apiLabels = await fetchShoppingItemsFromApi(body, name, lang, servings);
-      const localLabels = extractShoppingItemsFromRecipeText(body);
+      const apiLabels = await fetchShoppingItemsFromApi(body, name, lang, servings, ingredientsArr);
+      const localLabels = ingredientsArr && ingredientsArr.length > 0
+        ? ingredientsArr
+        : extractShoppingItemsFromRecipeText(body);
       const mergedRaw = apiLabels.length > 0 ? apiLabels : localLabels;
       const labels = normalizeShoppingIngredientLabels(mergedRaw);
       setFallbackNote(apiLabels.length === 0 && localLabels.length > 0);
       if (!labels.length) {
         setError(
-          API_BASE_URL
-            ? 'লিস্ট তৈরি করা গেল না। সার্ভার আপডেট করুন অথবা রেসিপিতে উপকরণ/পরিমাণ স্পষ্ট থাকা প্রয়োজন।'
-            : 'লিস্ট তৈরি করা গেল না। EXPO_PUBLIC_API_BASE_URL সেট করুন অথবা রেসিপি টেক্সট পর্যাপ্ত নয়।'
+          API_BASE_URL ? callbackUi.errorListBuildServer : callbackUi.errorListBuildNoApiBase
         );
         return;
       }
@@ -138,7 +228,7 @@ export default function ShoppingListScreen() {
   React.useEffect(() => {
     if (!recipeId) {
       setLoadingRecipe(false);
-      setError('রেসিপি আইডি নেই।');
+      setError(EN_SHOPPING_UI.errorNoRecipeId);
       return;
     }
 
@@ -150,15 +240,20 @@ export default function ShoppingListScreen() {
         const recipe = await getSavedRecipeById(recipeId);
         if (cancelled) return;
         if (!recipe) {
-          setError('রেসিপি পাওয়া যায়নি। আগে সেভ করা রেসিপি বেছে নিন।');
+          // No recipe loaded yet, so use English (we don't know the recipe's language).
+          setError(EN_SHOPPING_UI.errorRecipeNotFound);
           setLoadingRecipe(false);
           return;
         }
+        const recipeLang = recipe.language || 'English';
+        const recipeUi = resolveShoppingUi(recipeLang);
         const name = recipe.dishName || 'Recipe';
+        const ingredientsArr = recipe.ingredientsList ?? [];
         setDishName(name);
         setRecipeBody(recipe.recipe);
-        setLanguage(recipe.language || 'English');
+        setLanguage(recipeLang);
         setRecipeServings(parseServingsParam(recipe.servings));
+        setStructuredIngredients(ingredientsArr);
 
         const hasStored = await reloadFromStorage(recipeId, name);
         if (cancelled) return;
@@ -168,16 +263,23 @@ export default function ShoppingListScreen() {
           return;
         }
 
-        if (!recipe.recipe.trim()) {
-          setError('রেসিপি টেক্সট খালি—শপিং লিস্ট বানানো যাবে না।');
+        if (!recipe.recipe.trim() && !ingredientsArr.length) {
+          setError(recipeUi.errorEmptyRecipe);
           setLoadingRecipe(false);
           return;
         }
 
         setLoadingRecipe(false);
-        await generateAndStore(recipeId, name, recipe.recipe, recipe.language || 'English', parseServingsParam(recipe.servings));
+        await generateAndStore(
+          recipeId,
+          name,
+          recipe.recipe,
+          recipeLang,
+          parseServingsParam(recipe.servings),
+          ingredientsArr.length ? ingredientsArr : undefined
+        );
       } catch {
-        if (!cancelled) setError('লোড করা যায়নি।');
+        if (!cancelled) setError(EN_SHOPPING_UI.errorLoadFailed);
         if (!cancelled) setLoadingRecipe(false);
       }
     })();
@@ -195,11 +297,18 @@ export default function ShoppingListScreen() {
   };
 
   const onRegenerate = () => {
-    if (!recipeId || !recipeBody.trim()) {
-      setError('রেসিপি টেক্সট নেই।');
+    if (!recipeId || (!recipeBody.trim() && structuredIngredients.length === 0)) {
+      setError(ui.errorNoRecipeText);
       return;
     }
-    void generateAndStore(recipeId, dishName, recipeBody, language, recipeServings);
+    void generateAndStore(
+      recipeId,
+      dishName,
+      recipeBody,
+      language,
+      recipeServings,
+      structuredIngredients.length ? structuredIngredients : undefined
+    );
   };
 
   const remaining = items.filter((x) => !x.checked).length;
@@ -208,25 +317,23 @@ export default function ShoppingListScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.page}>
       <TouchableOpacity style={styles.back} onPress={() => router.back()}>
-        <Text style={styles.backText}>Back</Text>
+        <Text style={styles.backText}>{ui.back}</Text>
       </TouchableOpacity>
 
-      <Text style={styles.title}>{dishName || 'Shopping list'}</Text>
+      <Text style={styles.title}>{dishName || ui.fallbackTitle}</Text>
       <Text style={styles.sub}>
-        {items.length > 0 ? `বাকি ${remaining} / মোট ${items.length}` : ' '}
+        {items.length > 0 ? ui.remainingOf(remaining, items.length) : ' '}
       </Text>
 
       {fallbackNote && items.length > 0 ? (
-        <Text style={styles.fallbackNote}>
-          সার্ভার লিস্ট unavailable — রেসিপি টেক্সট থেকে স্বয়ংক্রিয় সংক্ষিপ্ত লিস্ট। নতুন সার্ভার ডিপ্লয় করলে আরও নির্ভুল হবে।
-        </Text>
+        <Text style={styles.fallbackNote}>{ui.fallbackNote}</Text>
       ) : null}
 
       {loadingRecipe || generating ? (
         <View style={styles.loader}>
           <ActivityIndicator size="large" color="#d3b275" />
           <Text style={styles.loaderText}>
-            {generating ? 'উপকরণের লিস্ট তৈরি হচ্ছে…' : 'লোড হচ্ছে…'}
+            {generating ? ui.generating : ui.loading}
           </Text>
         </View>
       ) : null}
@@ -236,7 +343,7 @@ export default function ShoppingListScreen() {
       {!loadingRecipe && !generating && items.length > 0 ? (
         <>
           <TouchableOpacity style={styles.regenBtn} onPress={onRegenerate} disabled={generating}>
-            <Text style={styles.regenText}>লিস্ট আবার তৈরি করুন</Text>
+            <Text style={styles.regenText}>{ui.regenerate}</Text>
           </TouchableOpacity>
           <FlatList
             style={styles.listFlex}
@@ -259,7 +366,7 @@ export default function ShoppingListScreen() {
       ) : null}
 
       {!loadingRecipe && !generating && !error && items.length === 0 ? (
-        <Text style={styles.empty}>কোনো আইটেম নেই।</Text>
+        <Text style={styles.empty}>{ui.emptyItems}</Text>
       ) : null}
       <DesignerCreditLine />
       <HomeExploreNav />

@@ -12,6 +12,13 @@ import {
 } from '@/constants/recipe-preferences';
 import { saveCookModeSession } from '@/constants/cook-mode-session';
 import { getSavedRecipeById, makeShortRecipeId, upsertSavedRecipe, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
+import {
+  deriveStructuredFromText,
+  getRecipeSectionLabels,
+  joinStructuredRecipe,
+  readStructuredRecipeFromPayload,
+  type StructuredRecipe,
+} from '@/lib/recipe-structured';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -32,7 +39,8 @@ const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
 // Locked timeout/retry policy for production stability.
 type NutritionEstimate = { caloriesKcal: number | null; proteinG: number | null; carbsG: number | null };
 const EMPTY_NUTRITION: NutritionEstimate = { caloriesKcal: null, proteinG: null, carbsG: null };
-const recipeDetailsCache: Record<string, { dishName: string; recipe: string; imageUrl: string; nutrition: NutritionEstimate }> = {};
+const EMPTY_STRUCTURED: StructuredRecipe = { ingredients: [], steps: [], tips: [], yieldServings: null };
+const recipeDetailsCache: Record<string, { dishName: string; recipe: string; imageUrl: string; nutrition: NutritionEstimate; structured: StructuredRecipe }> = {};
 
 const isAbortError = (error: unknown) =>
   error instanceof Error && error.name === 'AbortError';
@@ -96,6 +104,7 @@ export default function RecipeDetailsScreen() {
 
   const [dishName, setDishName] = useState(recipeName);
   const [recipe, setRecipe] = useState('');
+  const [structured, setStructured] = useState<StructuredRecipe>(EMPTY_STRUCTURED);
   const [imageUrl, setImageUrl] = useState('');
   const [imageError, setImageError] = useState(false);
   const [imageFallbackTried, setImageFallbackTried] = useState(false);
@@ -103,6 +112,8 @@ export default function RecipeDetailsScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [nutrition, setNutrition] = useState<NutritionEstimate>(EMPTY_NUTRITION);
+
+  const sectionLabels = getRecipeSectionLabels(selectedLang);
 
   const saveRecentView = useCallback(async (name: string) => {
     try {
@@ -124,17 +135,19 @@ export default function RecipeDetailsScreen() {
   }, [ingredient, selectedCuisine, selectedLang]);
 
   const openCookMode = async () => {
-    if (!recipe.trim()) return;
+    if (!recipe.trim() && !structured.steps.length) return;
     await saveCookModeSession({
       dishName: dishName.trim() || recipeName.trim(),
       recipe: recipe.trim(),
       language: selectedLang,
+      ...(structured.steps.length ? { steps: structured.steps } : {}),
+      ...(structured.ingredients.length ? { ingredients: structured.ingredients } : {}),
     });
     router.push('/cook-mode');
   };
 
   const saveRecipe = async () => {
-    if (!recipe.trim()) return;
+    if (!recipe.trim() && !structured.steps.length) return;
     setSaving(true);
     const alerts = getSaveRecipeAlerts(selectedLang);
     try {
@@ -157,6 +170,10 @@ export default function RecipeDetailsScreen() {
         nutritionCaloriesKcal: nutrition.caloriesKcal != null ? String(nutrition.caloriesKcal) : '',
         nutritionProteinG: nutrition.proteinG != null ? String(nutrition.proteinG) : '',
         nutritionCarbsG: nutrition.carbsG != null ? String(nutrition.carbsG) : '',
+        ...(structured.ingredients.length ? { ingredientsList: structured.ingredients } : {}),
+        ...(structured.steps.length ? { steps: structured.steps } : {}),
+        ...(structured.tips.length ? { tips: structured.tips } : {}),
+        ...(structured.yieldServings != null ? { yieldServings: String(structured.yieldServings) } : {}),
         savedAt: new Date().toISOString(),
       };
       await upsertSavedRecipe(nextItem);
@@ -202,7 +219,9 @@ export default function RecipeDetailsScreen() {
             servings,
           }),
         },
-        70000
+        // Server may take up to ~135s in the worst case (2 Gemini attempts at
+        // 60s + 75s) plus image generation. 150s leaves a small buffer.
+        150000
       );
     } catch (error) {
       if (isAbortError(error)) {
@@ -223,8 +242,25 @@ export default function RecipeDetailsScreen() {
     }
 
     const data = await response.json();
+    if (data?.degraded === true) {
+      const degradedMessage =
+        typeof data?.message === 'string' && data.message.trim()
+          ? data.message
+          : 'Recipe generator is temporarily unavailable. Please try again.';
+      throw new Error(degradedMessage);
+    }
     const name = typeof data?.dishName === 'string' && data.dishName.trim() ? data.dishName.trim() : recipeName;
-    const instructions = typeof data?.recipe === 'string' ? cleanRecipeText(data.recipe) : '';
+
+    // Structured-first: read arrays from the new contract. If missing (older
+    // server / fallback path), derive from the legacy `recipe` text.
+    let structuredFromBackend = readStructuredRecipeFromPayload(data);
+    if (!structuredFromBackend.steps.length && typeof data?.recipe === 'string') {
+      structuredFromBackend = deriveStructuredFromText(data.recipe);
+    }
+    const instructions = typeof data?.recipe === 'string' && data.recipe.trim()
+      ? cleanRecipeText(data.recipe)
+      : joinStructuredRecipe(structuredFromBackend, selectedLang);
+
     const generatedImageUrl = typeof data?.imageUrl === 'string' ? data.imageUrl : '';
     const nutritionEstimate = data?.nutritionEstimate && typeof data.nutritionEstimate === 'object'
       ? {
@@ -237,8 +273,10 @@ export default function RecipeDetailsScreen() {
         }
       : EMPTY_NUTRITION;
 
-    if (!instructions) throw new Error('No recipe details returned from backend');
-    return { name, instructions, generatedImageUrl, nutritionEstimate };
+    if (!instructions && !structuredFromBackend.steps.length) {
+      throw new Error('No recipe details returned from backend');
+    }
+    return { name, instructions, structured: structuredFromBackend, generatedImageUrl, nutritionEstimate };
   }, [
     recipeName,
     ingredient,
@@ -260,6 +298,7 @@ export default function RecipeDetailsScreen() {
       setLoading(true);
       setErrorMessage('');
       setRecipe('');
+      setStructured(EMPTY_STRUCTURED);
       setImageUrl('');
       setNutrition(EMPTY_NUTRITION);
       setImageError(false);
@@ -268,9 +307,23 @@ export default function RecipeDetailsScreen() {
       try {
         if (recipeId) {
           const localSaved = await getSavedRecipeById(recipeId);
-          if (localSaved?.recipe?.trim()) {
+          if (localSaved?.recipe?.trim() || (localSaved?.steps && localSaved.steps.length)) {
+            const yieldFromSaved =
+              localSaved.yieldServings && Number.isFinite(Number.parseInt(localSaved.yieldServings, 10))
+                ? Number.parseInt(localSaved.yieldServings, 10)
+                : null;
+            const savedStructured: StructuredRecipe = {
+              ingredients: localSaved.ingredientsList ?? [],
+              steps: localSaved.steps ?? [],
+              tips: localSaved.tips ?? [],
+              yieldServings: yieldFromSaved,
+            };
+            const finalStructured = savedStructured.steps.length
+              ? savedStructured
+              : deriveStructuredFromText(localSaved.recipe);
             setDishName(localSaved.dishName || recipeName);
-            setRecipe(localSaved.recipe);
+            setStructured(finalStructured);
+            setRecipe(localSaved.recipe || joinStructuredRecipe(finalStructured, selectedLang));
             setImageUrl(localSaved.imageUrl || '');
             setNutrition({
               caloriesKcal: localSaved.nutritionCaloriesKcal ? Number.parseInt(localSaved.nutritionCaloriesKcal, 10) || null : null,
@@ -281,9 +334,11 @@ export default function RecipeDetailsScreen() {
           }
         }
 
-        const { name, instructions, generatedImageUrl, nutritionEstimate } = await fetchRecipeDetailsFromBackend();
+        const { name, instructions, structured: backendStructured, generatedImageUrl, nutritionEstimate } =
+          await fetchRecipeDetailsFromBackend();
 
         setDishName(name);
+        setStructured(backendStructured);
         setRecipe(instructions);
         setImageUrl(generatedImageUrl);
         setNutrition(nutritionEstimate);
@@ -293,6 +348,7 @@ export default function RecipeDetailsScreen() {
           recipe: instructions,
           imageUrl: generatedImageUrl,
           nutrition: nutritionEstimate,
+          structured: backendStructured,
         };
       } catch (error) {
         console.error(error);
@@ -396,7 +452,57 @@ export default function RecipeDetailsScreen() {
                 </Text>
               </View>
             ) : null}
-            {recipe ? (
+            {structured.steps.length || structured.ingredients.length || structured.tips.length ? (
+              <View style={styles.recipeCard}>
+                {structured.yieldServings != null ? (
+                  <Text style={styles.yieldText}>
+                    {sectionLabels.yieldsLabel}: {structured.yieldServings} {sectionLabels.servingsLabel}
+                  </Text>
+                ) : null}
+
+                {structured.ingredients.length ? (
+                  <>
+                    <Text style={styles.sectionHeading}>{sectionLabels.ingredients}</Text>
+                    <View style={styles.bulletGroup}>
+                      {structured.ingredients.map((item, i) => (
+                        <View key={`ing-${i}`} style={styles.bulletRow}>
+                          <Text style={styles.bulletDot}>•</Text>
+                          <Text style={styles.bulletText}>{item}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                ) : null}
+
+                {structured.steps.length ? (
+                  <>
+                    <Text style={styles.sectionHeading}>{sectionLabels.instructions}</Text>
+                    <View style={styles.bulletGroup}>
+                      {structured.steps.map((step, i) => (
+                        <View key={`step-${i}`} style={styles.bulletRow}>
+                          <Text style={styles.stepNumber}>{i + 1}.</Text>
+                          <Text style={styles.bulletText}>{step}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                ) : null}
+
+                {structured.tips.length ? (
+                  <>
+                    <Text style={styles.sectionHeading}>{sectionLabels.tips}</Text>
+                    <View style={styles.bulletGroup}>
+                      {structured.tips.map((tip, i) => (
+                        <View key={`tip-${i}`} style={styles.bulletRow}>
+                          <Text style={styles.bulletDot}>•</Text>
+                          <Text style={styles.bulletText}>{tip}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                ) : null}
+              </View>
+            ) : recipe ? (
               <View style={styles.recipeCard}>
                 <Text style={styles.recipeText}>{recipe}</Text>
               </View>
@@ -473,6 +579,27 @@ const styles = StyleSheet.create({
   },
   recipeCard: { width: '100%', backgroundColor: '#111', padding: 25, borderRadius: 20, marginBottom: 20 },
   recipeText: { color: '#ddd', fontSize: 16, lineHeight: 26 },
+  yieldText: { color: '#9a9a9a', fontSize: 13, marginBottom: 12 },
+  sectionHeading: {
+    color: '#d3b275',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginTop: 14,
+    marginBottom: 10,
+  },
+  bulletGroup: { gap: 8 },
+  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  bulletDot: { color: '#d3b275', fontSize: 16, lineHeight: 24, width: 18 },
+  stepNumber: {
+    color: '#d3b275',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 24,
+    width: 24,
+  },
+  bulletText: { flex: 1, color: '#ddd', fontSize: 15, lineHeight: 24 },
   nutritionCard: {
     width: '100%',
     backgroundColor: '#121212',

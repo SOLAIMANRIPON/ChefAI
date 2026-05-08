@@ -147,24 +147,157 @@ const buildDishImageUrl = (seedText) => {
   return `https://placehold.co/1024x768/111111/d3b275?text=${label}`;
 };
 
-async function generateText(prompt, timeoutMs = 30000) {
-  if (!GEMINI_API_KEY) return null;
+/**
+ * Mirror of `lib/recipe-structured.ts` — kept inline because the server is
+ * plain JS and can't import the TS module without a build step. Update both
+ * sides together when changing the structured-recipe contract.
+ */
+const RECIPE_SECTION_LABELS_BY_LANGUAGE = {
+  বাংলা: { ingredients: 'উপকরণ', instructions: 'নির্দেশনা', tips: 'টিপস', yieldsLabel: 'পরিবেশন', servingsLabel: 'জন' },
+  English: { ingredients: 'Ingredients', instructions: 'Instructions', tips: 'Tips', yieldsLabel: 'Yields', servingsLabel: 'servings' },
+  Hindi: { ingredients: 'सामग्री', instructions: 'निर्देश', tips: 'सुझाव', yieldsLabel: 'परिमाण', servingsLabel: 'सर्विंग्स' },
+  Arabic: { ingredients: 'المكونات', instructions: 'التعليمات', tips: 'نصائح', yieldsLabel: 'الكمية', servingsLabel: 'حصص' },
+  Urdu: { ingredients: 'اجزاء', instructions: 'ہدایات', tips: 'تجاویز', yieldsLabel: 'مقدار', servingsLabel: 'حصص' },
+  Spanish: { ingredients: 'Ingredientes', instructions: 'Instrucciones', tips: 'Consejos', yieldsLabel: 'Rinde', servingsLabel: 'porciones' },
+  French: { ingredients: 'Ingrédients', instructions: 'Instructions', tips: 'Astuces', yieldsLabel: 'Portions', servingsLabel: 'portions' },
+};
+
+function coerceStringArray(value, max = 80) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const v of value) {
+    if (typeof v === 'string') {
+      const t = v.trim();
+      if (t) out.push(t);
+    } else if (v && typeof v === 'object') {
+      const candidate = v.text || v.name || v.value || '';
+      const t = String(candidate).trim();
+      if (t) out.push(t);
+    }
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function readStructuredRecipeFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return { ingredients: [], steps: [], tips: [], yieldServings: null };
+  }
+  let yieldServings = null;
+  const yr = payload.yieldServings;
+  if (typeof yr === 'number' && Number.isFinite(yr)) yieldServings = Math.round(yr);
+  else if (typeof yr === 'string' && yr.trim()) {
+    const n = Number.parseInt(yr.trim(), 10);
+    if (Number.isFinite(n)) yieldServings = n;
+  }
+  return {
+    ingredients: coerceStringArray(payload.ingredients),
+    steps: coerceStringArray(payload.steps),
+    tips: coerceStringArray(payload.tips),
+    yieldServings,
+  };
+}
+
+/** Last-resort step extraction for legacy text returned without arrays. */
+function deriveStepsFromText(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return [];
+  const re = /(?:^|\s)(\d+)[.)।]\s+/g;
+  const starts = [];
+  let m;
+  while ((m = re.exec(trimmed)) !== null) {
+    const offset = m[0].search(/\d/);
+    starts.push(m.index + offset);
+  }
+  if (starts.length >= 2) {
+    const out = [];
+    for (let i = 0; i < starts.length; i += 1) {
+      const a = starts[i];
+      const b = i + 1 < starts.length ? starts[i + 1] : trimmed.length;
+      const seg = trimmed.slice(a, b).trim().replace(/^\d+[.)।]\s+/, '').trim();
+      if (seg) out.push(seg);
+    }
+    return out;
+  }
+  return trimmed.split(/\n/).map((l) => l.trim()).filter(Boolean);
+}
+
+function deriveStructuredFromText(text) {
+  return {
+    ingredients: [],
+    steps: deriveStepsFromText(text),
+    tips: [],
+    yieldServings: null,
+  };
+}
+
+function joinStructuredRecipe(structured, language) {
+  const labels = RECIPE_SECTION_LABELS_BY_LANGUAGE[language] || RECIPE_SECTION_LABELS_BY_LANGUAGE.English;
+  const parts = [];
+  if (structured.yieldServings != null && Number.isFinite(structured.yieldServings)) {
+    parts.push(`${labels.yieldsLabel}: ${structured.yieldServings} ${labels.servingsLabel}.`);
+  }
+  if (Array.isArray(structured.ingredients) && structured.ingredients.length) {
+    parts.push(`${labels.ingredients}:`);
+    for (const item of structured.ingredients) {
+      const t = String(item || '').trim();
+      if (t) parts.push(`• ${t}`);
+    }
+  }
+  if (Array.isArray(structured.steps) && structured.steps.length) {
+    if (parts.length) parts.push('');
+    parts.push(`${labels.instructions}:`);
+    structured.steps.forEach((step, i) => {
+      const t = String(step || '').trim();
+      if (t) parts.push(`${i + 1}. ${t}`);
+    });
+  }
+  if (Array.isArray(structured.tips) && structured.tips.length) {
+    if (parts.length) parts.push('');
+    parts.push(`${labels.tips}:`);
+    for (const tip of structured.tips) {
+      const t = String(tip || '').trim();
+      if (t) parts.push(`• ${t}`);
+    }
+  }
+  return parts.join('\n');
+}
+
+async function generateText(prompt, timeoutMs = 60000) {
+  if (!GEMINI_API_KEY) {
+    console.warn('[generateText] GEMINI_API_KEY missing — returning null (server fallback will be used).');
+    return null;
+  }
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: GEMINI_TEXT_MODEL });
-  const maxAttempts = 3;
+  // 2 attempts keeps total worst-case wait ≤ ~135s for 60s base timeout, which
+  // is acceptable for the user. More retries rarely help — if the model is
+  // overloaded enough to time out at 60s, the cost of more retries outweighs
+  // the marginal benefit.
+  const maxAttempts = 2;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // Give each retry a slightly larger budget; complex JSON prompts can take
+    // 30–60s on flash-lite preview models, so the first attempt alone needs
+    // ~60s, and retries get up to ~75s/90s.
+    const attemptTimeoutMs = Math.round(timeoutMs * (1 + (attempt - 1) * 0.25));
     try {
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Gemini timeout')), timeoutMs);
+        setTimeout(() => reject(new Error('Gemini timeout')), attemptTimeoutMs);
       });
 
       const resultPromise = model.generateContent(prompt);
       const result = await Promise.race([resultPromise, timeoutPromise]);
       const text = result.response.text();
-      return text || null;
+      if (!text) {
+        console.warn(`[generateText] Empty response from ${GEMINI_TEXT_MODEL} (attempt ${attempt}/${maxAttempts}).`);
+        if (attempt < maxAttempts) continue;
+        return null;
+      }
+      return text;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const status = error?.status || error?.statusCode;
       const isTemporaryOverload =
         message.includes('503') ||
         message.toLowerCase().includes('service unavailable') ||
@@ -177,18 +310,53 @@ async function generateText(prompt, timeoutMs = 30000) {
         message.toLowerCase().includes('quota') ||
         message.toLowerCase().includes('billing') ||
         message.toLowerCase().includes('prepayment credits are depleted');
+      const isModelNotFound =
+        message.includes('404') ||
+        message.toLowerCase().includes('not found') ||
+        message.toLowerCase().includes('was not found') ||
+        message.toLowerCase().includes('does not exist');
+      const isAuthError =
+        message.includes('401') ||
+        message.includes('403') ||
+        message.toLowerCase().includes('api key') ||
+        message.toLowerCase().includes('permission denied') ||
+        message.toLowerCase().includes('unauthorized');
+      const isTransient = isTemporaryOverload || isTimeout;
 
-      if (isTemporaryOverload && attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
+      console.error(
+        `[generateText] attempt ${attempt}/${maxAttempts} failed (model=${GEMINI_TEXT_MODEL}, attemptTimeout=${attemptTimeoutMs}ms${
+          status ? `, status=${status}` : ''
+        }): ${message}`
+      );
+
+      // Hard-fail (no retry) on configuration / billing errors — retries won't help.
+      if (isModelNotFound) {
+        console.error(
+          `[generateText] Model "${GEMINI_TEXT_MODEL}" not found. Check GEMINI_TEXT_MODEL in .env (e.g. gemini-2.5-flash, gemini-3.1-flash-lite).`
+        );
+        return null;
+      }
+      if (isAuthError) {
+        console.error('[generateText] Auth error — verify GEMINI_API_KEY is valid and has access to this model.');
+        return null;
+      }
+      if (isQuotaOrBillingIssue) {
+        console.error('[generateText] Quota or billing issue — using fallback.');
+        return null;
+      }
+
+      // Retry transient failures (overload + timeout) with backoff.
+      if (isTransient && attempt < maxAttempts) {
+        const backoffMs = attempt * 1200;
+        console.warn(`[generateText] Transient failure — retrying after ${backoffMs}ms (attempt ${attempt + 1}/${maxAttempts}).`);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
         continue;
       }
 
-      // For temporary provider-side overload, fail gracefully to fallback recipes.
-      if (isTemporaryOverload) return null;
-      // For timeout, return null so endpoints can use fallback payload.
-      if (isTimeout) return null;
-      // For exhausted credits/quota, return null so endpoints can use fallback response.
-      if (isQuotaOrBillingIssue) return null;
+      if (isTransient) {
+        console.warn('[generateText] Transient failures exhausted retries — using fallback.');
+        return null;
+      }
       throw error;
     }
   }
@@ -440,7 +608,9 @@ Return only the list in ${language}, one line each.`;
 
     const text = await generateText(prompt, 35000);
     if (!text) {
-      // Safe fallback if key is not configured yet.
+      console.warn(
+        `[recipes] Falling back to placeholder names for "${userQuery}" — see [generateText] log lines for the root cause.`
+      );
       const fallbackRecipes = [
         `${userQuery} Special`,
         `${userQuery} Classic`,
@@ -453,7 +623,7 @@ Return only the list in ${language}, one line each.`;
         `${userQuery} Rice Bowl`,
         `${userQuery} Fusion`,
       ];
-      return res.json({ recipes: fallbackRecipes });
+      return res.json({ recipes: fallbackRecipes, degraded: true });
     }
 
     const recipes = parseRecipeList(text);
@@ -516,23 +686,61 @@ ${difficultyBlock}
 ${timeBlock}
 ${modeBlock}
 ${nutritionBlock ? `User nutrition preferences (apply to ingredients, substitutions, and steps): ${nutritionBlock}` : ''}
-Return strict JSON with keys:
+
+Return STRICT JSON only — no markdown, no commentary, no surrounding text — with EXACTLY this shape:
 {
-  "dishName": "string",
-  "recipe": "concise step-by-step instructions with tips",
+  "dishName": "string in ${language}",
+  "yieldServings": <integer or null, e.g. 4>,
+  "ingredients": [
+    "one ingredient line — include amount + unit + name, e.g. '1.5 lbs flank steak (sliced into 1/4-inch strips)'",
+    "..."
+  ],
+  "steps": [
+    "ONE cooking instruction per array element. NO leading numbering like '1.' or 'Step 1:' — that is added by the UI. NO 'Ingredients:' / 'Instructions:' headers inside steps.",
+    "..."
+  ],
+  "tips": [
+    "Optional short cooking tip. Empty array if none.",
+    "..."
+  ],
   "imagePrompt": "short english food photo query, include dish name and cuisine",
   "nutritionEstimate": {
-    "caloriesKcal": "number or null",
-    "proteinG": "number or null",
-    "carbsG": "number or null"
+    "caloriesKcal": <number or null>,
+    "proteinG": <number or null>,
+    "carbsG": <number or null>
   }
-}`;
+}
 
-    const text = await generateText(prompt, 35000);
+Rules (do NOT violate):
+- "ingredients" and "steps" MUST be arrays of strings, never one big paragraph.
+- Each "steps" element is a single self-contained cooking instruction. Aim for 4–12 steps total.
+- Do NOT prepend numbering ("1.", "1)", "Step 1:") or section headers ("Ingredients:", "Instructions:") inside any element.
+- All user-facing strings use language: ${language}. Numbers and units stay in their natural form.
+- If you cannot honor a constraint, still return valid JSON with the closest reasonable values.`;
+
+    const text = await generateText(prompt, 60000);
     if (!text) {
-      return res.json({
+      console.warn(
+        `[recipes/details] Falling back to placeholder content for "${recipeName}" — Gemini text generation returned no usable text. Check earlier [generateText] log lines for the root cause.`
+      );
+      const fallbackSteps = [
+        `Prepare ingredients for ${recipeName}.`,
+        `Cook with medium heat and proper seasoning.`,
+        `Serve hot.`,
+      ];
+      const fallbackStructured = {
+        ingredients: [],
+        steps: fallbackSteps,
+        tips: ['Adjust spice level based on preference.'],
+        yieldServings: servings,
+      };
+      return res.status(503).json({
+        degraded: true,
+        message:
+          'Recipe generator is temporarily unavailable. Please try again in a moment.',
         dishName: String(recipeName),
-        recipe: `1) Prepare ingredients for ${recipeName}.\n2) Cook with medium heat and proper seasoning.\n3) Serve hot.\n\nTip: Adjust spice level based on preference.`,
+        recipe: joinStructuredRecipe(fallbackStructured, language),
+        ...fallbackStructured,
         imageUrl: buildDishImageUrl(`${recipeName}, food, ${cuisine}`),
         nutritionEstimate: { caloriesKcal: null, proteinG: null, carbsG: null },
       });
@@ -543,14 +751,29 @@ Return strict JSON with keys:
       const jsonChunk = text.match(/\{[\s\S]*\}/)?.[0] || text;
       parsed = JSON.parse(jsonChunk);
     } catch {
-      parsed = {
-        dishName: String(recipeName),
-        recipe: text,
-      };
+      parsed = { dishName: String(recipeName), recipe: text };
     }
 
-    const dishName = typeof parsed.dishName === 'string' ? parsed.dishName : String(recipeName);
-    const recipe = typeof parsed.recipe === 'string' ? parsed.recipe : String(text);
+    const dishName = typeof parsed.dishName === 'string' && parsed.dishName.trim()
+      ? parsed.dishName.trim()
+      : String(recipeName);
+
+    // Structured-first: prefer arrays returned by the model. Fall back to deriving
+    // them from the legacy `recipe` string only if the model ignored the schema.
+    let structured = readStructuredRecipeFromPayload(parsed);
+    const legacyRecipeText = typeof parsed.recipe === 'string' ? parsed.recipe : '';
+    if (!structured.steps.length && legacyRecipeText.trim()) {
+      structured = deriveStructuredFromText(legacyRecipeText);
+    }
+    if (!structured.steps.length) {
+      // Model produced neither arrays nor `recipe` text — last-resort: use the raw
+      // generation as a single step so the user still sees something usable.
+      structured = { ingredients: [], steps: [text.trim()], tips: [], yieldServings: servings };
+    }
+    if (structured.yieldServings == null) structured.yieldServings = servings;
+
+    const recipeJoined = joinStructuredRecipe(structured, language);
+
     const parsedNutrition =
       parsed?.nutritionEstimate && typeof parsed.nutritionEstimate === 'object' ? parsed.nutritionEstimate : {};
     const nutritionEstimate = {
@@ -583,7 +806,16 @@ Return strict JSON with keys:
         message: 'Gemini image is temporarily unavailable. Please try again in a moment.',
       });
     }
-    return res.json({ dishName, recipe, imageUrl, nutritionEstimate });
+    return res.json({
+      dishName,
+      recipe: recipeJoined,
+      ingredients: structured.ingredients,
+      steps: structured.steps,
+      tips: structured.tips,
+      yieldServings: structured.yieldServings,
+      imageUrl,
+      nutritionEstimate,
+    });
   } catch (error) {
     console.error('recipes/details failed:', error);
     return res.status(500).json({
@@ -594,10 +826,17 @@ Return strict JSON with keys:
 
 app.post('/api/v1/ai/recipes/shopping-list', async (req, res) => {
   try {
-    const { recipeText = '', dishName = 'Recipe', language = 'English', servings: rawServings } = req.body || {};
+    const {
+      recipeText = '',
+      ingredients: structuredIngredients,
+      dishName = 'Recipe',
+      language = 'English',
+      servings: rawServings,
+    } = req.body || {};
     const body = String(recipeText || '').trim();
-    if (!body) {
-      return res.status(400).json({ message: 'recipeText is required' });
+    const structuredList = coerceStringArray(structuredIngredients);
+    if (!body && !structuredList.length) {
+      return res.status(400).json({ message: 'recipeText or ingredients is required' });
     }
 
     const servings = coerceServings(rawServings);
@@ -606,18 +845,27 @@ app.post('/api/v1/ai/recipes/shopping-list', async (req, res) => {
         ? `The recipe is scaled for about ${servings} people — prefer ingredient quantities consistent with that scale when inferring needs.\n`
         : '';
 
+    // When the client already has the structured ingredient array (post-fix),
+    // ask Gemini to just normalize it (strip amounts/units, merge duplicates).
+    // Otherwise fall back to extracting items from the legacy free-form text.
+    const sourceBlock = structuredList.length
+      ? `Ingredient list (already split, one per line):\n${structuredList.slice(0, 80).join('\n')}`
+      : `Recipe text:\n"""\n${body.slice(0, 12000)}\n"""`;
+
     const prompt = `You extract a practical grocery shopping list from a recipe.
 Dish: "${String(dishName).slice(0, 200)}"
-${servingsHint}Recipe text:
-"""
-${body.slice(0, 12000)}
-"""
+${servingsHint}${sourceBlock}
 Return ONLY a JSON array of strings. Each string is ONE ingredient NAME only for grocery shopping — NO amounts, NO units (no cups, tsp, grams, কাপ, চামচ, কেজি, টি counts). Same language as the recipe (${language}). Merge duplicates (e.g. "onion" twice → once). Order: proteins/main veg first, then spices/pantry, max 35 items.`;
 
     const text = await generateText(prompt, 25000);
     let items = parseStringArrayJson(text || '');
     if (!items.length) {
-      items = fallbackShoppingItemsFromRecipe(body);
+      console.warn(
+        `[shopping-list] Gemini did not return a usable JSON array; falling back to local extraction (structuredIngredients=${structuredList.length}, recipeText=${body.length}chars).`
+      );
+      items = structuredList.length
+        ? structuredList.map((line) => line.replace(/^[\d./\s]+[a-zA-Z\u0980-\u09FF\u0900-\u097F\u0600-\u06FF]*\s*/, '').trim()).filter(Boolean)
+        : fallbackShoppingItemsFromRecipe(body);
     }
     if (!items.length) {
       return res.status(502).json({ message: 'Could not build shopping list' });
