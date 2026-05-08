@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import {
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -41,6 +42,11 @@ function truncateLabel(text: string, max = 42) {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
+function truncateVoiceLiveHint(text: string, max = 52) {
+  const t = text.trim().replace(/\s+/g, ' ');
+  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
+}
+
 type VoiceCommand =
   | 'next'
   | 'previous'
@@ -60,10 +66,22 @@ type VoiceCommand =
 
 type SpeechRecognitionPermission = { granted?: boolean };
 type SpeechRecognitionListener = { remove: () => void };
-type SpeechRecognitionResultEvent = { results?: { transcript?: string }[] };
+type SpeechRecognitionResultEvent = {
+  isFinal?: boolean;
+  results?: { transcript?: string }[];
+};
+type SpeechRecognitionStartOptions = {
+  lang?: string;
+  interimResults?: boolean;
+  continuous?: boolean;
+  /** Biases the engine toward Cook Mode phrases (Android 33+ / iOS). */
+  contextualStrings?: string[];
+  /** iOS: extra noise / feedback suppression — helps steady background noise (e.g. fans). */
+  iosVoiceProcessingEnabled?: boolean;
+};
 type SpeechRecognitionModuleLike = {
   requestPermissionsAsync: () => Promise<SpeechRecognitionPermission>;
-  start: (options: { lang?: string; interimResults?: boolean; continuous?: boolean }) => void;
+  start: (options: SpeechRecognitionStartOptions) => void;
   stop: () => void;
   addListener?: (
     eventName: 'start' | 'end' | 'result' | 'error',
@@ -147,6 +165,10 @@ type CookModeUi = {
   voiceUnavailable: string;
   voiceOff: string;
   voiceListening: string;
+  /** Shown while the mic is active (optional brief line under the title). */
+  voiceListeningSub: string;
+  /** Prefix before quoted interim transcript so the UI does not look frozen. */
+  voiceListeningLive: string;
   voiceReconnect: string;
   voiceRestart: string;
   micPermissionOff: string;
@@ -185,7 +207,9 @@ const EN_UI: CookModeUi = {
   noStepTimeStatus: 'No step time found for timer',
   voiceUnavailable: 'Voice command unavailable here. Use dev build.',
   voiceOff: 'Voice command off',
-  voiceListening: 'Voice command listening: Chef ...',
+  voiceListening: 'Listening for commands',
+  voiceListeningSub: 'Optional: say Chef, then your command.',
+  voiceListeningLive: 'Hearing',
   voiceReconnect: 'Voice command reconnecting...',
   voiceRestart: 'Voice command restarting...',
   micPermissionOff: 'Mic permission off - voice command disabled',
@@ -225,7 +249,9 @@ const COOK_UI_TEXT: Record<string, CookModeUi> = {
     noStepTimeStatus: 'এই ধাপে টাইমার সময় পাওয়া যায়নি',
     voiceUnavailable: 'Voice command unavailable here. Use dev build.',
     voiceOff: 'Voice command বন্ধ',
-    voiceListening: 'Voice command শুনছে: Chef ...',
+    voiceListening: 'কমান্ড শোনা হচ্ছে',
+    voiceListeningSub: 'চাইলে আগে Chef বলে তারপর কমান্ড বলুন।',
+    voiceListeningLive: 'শুনছি',
     voiceReconnect: 'Voice command reconnect হচ্ছে...',
     voiceRestart: 'Voice command restart হচ্ছে...',
     micPermissionOff: 'Mic permission off - voice command বন্ধ',
@@ -508,6 +534,31 @@ function getCommandCatalog(uiLanguage: string): Record<Exclude<VoiceCommand, nul
   return merged;
 }
 
+/**
+ * Short bias list for the OS recognizer (Android EXTRA_BIASING_STRINGS caps effective size).
+ * Uses the UI language catalog only — not the merged English fallback — to avoid huge lists.
+ */
+function collectSpeechBiasStrings(uiLanguage: string, maxStrings = 28): string[] {
+  const catalog = COMMAND_CANONICALS[uiLanguage] ?? COMMAND_CANONICALS.English;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  (Object.keys(catalog) as Exclude<VoiceCommand, null>[]).forEach((intent) => {
+    catalog[intent].forEach((phrase) => {
+      const t = phrase.trim();
+      if (t.length < 2 || seen.has(t)) return;
+      seen.add(t);
+      out.push(t);
+    });
+  });
+  return out.slice(0, maxStrings);
+}
+
+/** Bridge / OEM quirks: treat only explicit partials as non-final. */
+function speechResultIsPartial(event: SpeechRecognitionResultEvent): boolean {
+  const raw = (event as { isFinal?: unknown }).isFinal;
+  return raw === false || raw === 0 || raw === 'false';
+}
+
 function applyAsrFixes(input: string, uiLanguage: string): string {
   const base = uiLanguage === 'বাংলা' ? normalizeBnCommandText(input) : normalizeCommandText(input);
   if (uiLanguage === 'বাংলা') {
@@ -553,6 +604,12 @@ function levenshtein(a: string, b: string): number {
   return dp[a.length][b.length];
 }
 
+function fuzzyMatchThresholdForPhraseLength(phraseLength: number): number {
+  if (phraseLength <= 5) return 1;
+  if (phraseLength <= 11) return 2;
+  return 3;
+}
+
 function bestFuzzyCommandMatch(
   text: string,
   catalog: Record<Exclude<VoiceCommand, null>, string[]>,
@@ -567,13 +624,16 @@ function bestFuzzyCommandMatch(
     catalog[command].forEach((phrase) => {
       const normalizedPhrase = applyAsrFixes(phrase, uiLanguage);
       const distance = levenshtein(text, normalizedPhrase);
-      if (distance < best.distance) {
+      if (
+        distance < best.distance ||
+        (distance === best.distance && normalizedPhrase.length > best.phraseLength)
+      ) {
         best = { command, distance, phraseLength: normalizedPhrase.length };
       }
     });
   });
   if (!best.command) return null;
-  const threshold = best.phraseLength <= 10 ? 2 : 3;
+  const threshold = fuzzyMatchThresholdForPhraseLength(best.phraseLength);
   return best.distance <= threshold ? best.command : null;
 }
 
@@ -717,6 +777,22 @@ export default function CookModeScreen() {
   ].filter(Boolean);
   const voiceHintText = `${resolvedVoiceLanguage === 'বাংলা' ? 'বলুন' : 'Say'}: ${hintPhrases.join(', ')}`;
   const speechLocale = SPEECH_LOCALE_BY_LANGUAGE[resolvedVoiceLanguage] ?? 'en-US';
+  const speechBiasStrings = React.useMemo(
+    () => collectSpeechBiasStrings(resolvedVoiceLanguage),
+    [resolvedVoiceLanguage]
+  );
+  const cookModeSpeechRecognitionOptions = React.useMemo(
+    (): SpeechRecognitionStartOptions => ({
+      lang: speechLocale,
+      interimResults: true,
+      // Android 13+ continuous mode streams segments; some devices rarely surface finals reliably.
+      // One-shot sessions fire `onResults` with isFinal; `end` listener already restarts recognition.
+      continuous: Platform.OS !== 'android',
+      contextualStrings: speechBiasStrings.length > 0 ? speechBiasStrings : undefined,
+      iosVoiceProcessingEnabled: Platform.OS === 'ios',
+    }),
+    [speechBiasStrings, speechLocale]
+  );
   const spokenStepPrefix = ui.stepWord;
 
   const timerStripVisible =
@@ -857,14 +933,10 @@ export default function CookModeScreen() {
         return false;
       }
       setVoiceStatusText(ui.voiceListening);
-      speechRecognitionModule.start({
-        lang: speechLocale,
-        interimResults: true,
-        continuous: true,
-      });
+      speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
       return true;
     });
-  }, [speechRecognitionModule, speechLocale]);
+  }, [cookModeSpeechRecognitionOptions, speechRecognitionModule]);
 
   const scrollByVoice = React.useCallback((delta: number) => {
     const maxY = Math.max(0, scrollContentHeightRef.current - scrollViewportHeightRef.current);
@@ -941,6 +1013,15 @@ export default function CookModeScreen() {
 
     const onResult = speechRecognitionModule.addListener('result', (event: SpeechRecognitionResultEvent) => {
       const transcript = event.results?.[0]?.transcript?.trim();
+
+      // Only explicit partials skip command handling (see speechResultIsPartial).
+      if (speechResultIsPartial(event)) {
+        if (transcript) {
+          setVoiceStatusText(`${ui.voiceListeningLive}: "${truncateVoiceLiveHint(transcript)}"`);
+        }
+        return;
+      }
+
       if (!transcript) return;
 
       const now = Date.now();
@@ -959,11 +1040,7 @@ export default function CookModeScreen() {
       setVoiceStatusText(ui.voiceReconnect);
       setTimeout(() => {
         if (!handsFreeEnabled) return;
-        speechRecognitionModule.start({
-          lang: speechLocale,
-          interimResults: true,
-          continuous: true,
-        });
+        speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
       }, 500);
     });
 
@@ -976,11 +1053,7 @@ export default function CookModeScreen() {
       setVoiceStatusText(ui.voiceRestart);
       setTimeout(() => {
         if (!handsFreeEnabled) return;
-        speechRecognitionModule.start({
-          lang: speechLocale,
-          interimResults: true,
-          continuous: true,
-        });
+        speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
       }, 250);
     });
 
@@ -990,7 +1063,14 @@ export default function CookModeScreen() {
       onStart?.remove();
       onEnd?.remove();
     };
-  }, [handsFreeEnabled, resolvedVoiceLanguage, runVoiceCommand, speechLocale, speechRecognitionModule]);
+  }, [
+    cookModeSpeechRecognitionOptions,
+    handsFreeEnabled,
+    resolvedVoiceLanguage,
+    runVoiceCommand,
+    speechRecognitionModule,
+    ui,
+  ]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1028,11 +1108,7 @@ export default function CookModeScreen() {
         if (cancelled) return;
         setHandsFreeEnabled(true);
         setVoiceStatusText(ui.voiceListening);
-        mod.start({
-          lang: speechLocale,
-          interimResults: true,
-          continuous: true,
-        });
+        mod.start(cookModeSpeechRecognitionOptions);
       } catch {
         setVoiceStatusText(ui.voiceNeedsDevBuild);
       }
@@ -1042,7 +1118,7 @@ export default function CookModeScreen() {
       cancelled = true;
       Speech.stop();
     };
-  }, [speechLocale, ui]);
+  }, [cookModeSpeechRecognitionOptions, ui]);
 
   if (loading) {
     return (
@@ -1112,6 +1188,7 @@ export default function CookModeScreen() {
               </View>
             </View>
             <Text style={styles.voiceInfoText}>{voiceStatusText}</Text>
+            {handsFreeEnabled ? <Text style={styles.voiceListeningSubText}>{ui.voiceListeningSub}</Text> : null}
             <Text style={styles.voiceInfoHint}>{voiceHintText}</Text>
           </View>
 
@@ -1320,6 +1397,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
   },
   voiceInfoText: { color: '#ddd', fontSize: 12, marginBottom: 6 },
+  voiceListeningSubText: { color: '#888', fontSize: 11, lineHeight: 16, marginBottom: 4 },
   voiceInfoHint: { color: '#999', fontSize: 12, lineHeight: 18 },
   bnVoiceBanner: {
     flexDirection: 'row',
