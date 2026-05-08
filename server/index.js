@@ -2,14 +2,25 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { TtlCache, canonicalKey } = require('./cache');
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3.1-flash-lite-preview').trim();
+const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3-flash-preview').trim();
 const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image').trim();
+
+// Per-endpoint AI response caches. TTLs picked so popular repeat queries
+// (same ingredient/dish/cuisine combo) skip Gemini entirely while still
+// expiring fast enough that prompt-engineering changes ship cleanly.
+const recipeListCache = new TtlCache();
+const recipeDetailsCache = new TtlCache();
+const shoppingListCache = new TtlCache();
+const TTL_RECIPE_LIST = 6 * 60 * 60 * 1000; // 6 hours
+const TTL_RECIPE_DETAILS = 24 * 60 * 60 * 1000; // 24 hours
+const TTL_SHOPPING_LIST = 24 * 60 * 60 * 1000; // 24 hours
 
 app.use(cors());
 app.use(express.json({ limit: '6mb' }));
@@ -504,6 +515,11 @@ app.get('/api/v1/health', (_req, res) => {
     textModel: GEMINI_TEXT_MODEL,
     imageModel: GEMINI_IMAGE_MODEL,
     timestamp: new Date().toISOString(),
+    cache: {
+      recipeList: recipeListCache.stats(),
+      recipeDetails: recipeDetailsCache.stats(),
+      shoppingList: shoppingListCache.stats(),
+    },
   });
 });
 
@@ -580,31 +596,47 @@ app.post('/api/v1/ai/recipes/list', async (req, res) => {
       return res.status(400).json({ message: 'query or ingredient is required' });
     }
 
-    const modeLine =
+    // Skip the cache when the client explicitly asks for a fresh batch (e.g.
+    // user tapped "more options"). Cache hit = zero Gemini cost.
+    const noCache = req.body?.nocache === true || req.query?.nocache === '1';
+    const cacheKey = canonicalKey('recipes/list', {
+      userQuery,
+      cuisine,
+      language,
+      generationMode,
+      dietPreference,
+      spiceLevel,
+      maxCaloriesPerMeal,
+      servings,
+      difficultyLevel,
+      cookTimeMinutes,
+    });
+    if (!noCache) {
+      const cached = recipeListCache.get(cacheKey);
+      if (cached) {
+        return res.json({ ...cached, cached: true });
+      }
+    }
+
+    // Compact prompt: collapsed verbose constraint blocks into hint phrases.
+    const styleHint =
       generationMode === 'creative'
-        ? `Creative mode: suggest distinctive, appetizing names—including fusion or modern twists where fitting—while staying achievable with common ingredients.`
-        : `Strict mode: suggest familiar, reliable ${cuisine} dish names people recognize; classic combinations; avoid gimmicky fusion unless the input clearly asks for it.`;
+        ? 'creative/fusion-leaning names OK'
+        : `familiar reliable ${cuisine} names; classic combos`;
+    const difficultyHint =
+      difficultyLevel === 'easy'
+        ? 'easy'
+        : difficultyLevel === 'hard'
+          ? 'advanced OK'
+          : 'medium home-cooking';
+    const timeHint = cookTimeMinutes != null ? `, ~${cookTimeMinutes} min` : '';
 
     const nutritionBlock = buildNutritionConstraints({ dietPreference, spiceLevel, maxCaloriesPerMeal });
 
-    const servingsLine = `Serving goal: recipes should work well for approximately ${servings} people (same meal); keep suggested dishes realistic at that scale.`;
-    const difficultyLine =
-      difficultyLevel === 'easy'
-        ? 'Difficulty target: EASY — beginner-friendly, fewer steps, common techniques, low risk of failure.'
-        : difficultyLevel === 'hard'
-          ? 'Difficulty target: HARD — advanced or multi-step recipes are acceptable.'
-          : 'Difficulty target: MEDIUM — approachable home-cooking with some technique but not overly advanced.';
-    const timeLine = cookTimeMinutes != null ? `Time target: prefer recipes that can be completed in about ${cookTimeMinutes} minutes or less.` : '';
-
-    const prompt = `You are ChefAI.
-Create exactly 10 ${cuisine} recipe names based on this user input: "${userQuery}".
-The input may be an ingredient name or a dish name.
-${servingsLine}
-${difficultyLine}
-${timeLine}
-${modeLine}
-${nutritionBlock ? `User nutrition preferences (you MUST only suggest dishes that can honor these): ${nutritionBlock}` : ''}
-Return only the list in ${language}, one line each.`;
+    const prompt = `Give 10 ${cuisine} recipe names for input "${userQuery}" (ingredient or dish).
+Servings ${servings}, ${difficultyHint}${timeHint}. Style: ${styleHint}.
+${nutritionBlock ? `Constraints (must honor): ${nutritionBlock}` : ''}
+Return ONLY the list in ${language}, one name per line, no numbering.`;
 
     const text = await generateText(prompt, 35000);
     if (!text) {
@@ -623,12 +655,15 @@ Return only the list in ${language}, one line each.`;
         `${userQuery} Rice Bowl`,
         `${userQuery} Fusion`,
       ];
+      // Don't cache degraded responses — we want the next request to retry.
       return res.json({ recipes: fallbackRecipes, degraded: true });
     }
 
     const recipes = parseRecipeList(text);
     if (!recipes.length) return res.status(502).json({ message: 'No recipes generated' });
-    return res.json({ recipes });
+    const payload = { recipes };
+    recipeListCache.set(cacheKey, payload, TTL_RECIPE_LIST);
+    return res.json(payload);
   } catch (error) {
     console.error('recipes/list failed:', error);
     return res.status(500).json({
@@ -659,64 +694,65 @@ app.post('/api/v1/ai/recipes/details', async (req, res) => {
     const difficultyLevel = normalizeDifficultyLevel(rawDifficultyLevel);
     const cookTimeMinutes = coerceCookTimeMinutes(rawCookTimeMinutes);
 
-    const modeBlock =
+    // Cache hit = zero Gemini cost. Identical request inputs (same recipe
+    // name + cuisine + language + constraints) reliably want the same output.
+    const noCache = req.body?.nocache === true || req.query?.nocache === '1';
+    const cacheKey = canonicalKey('recipes/details', {
+      recipeName,
+      userQuery,
+      cuisine,
+      language,
+      generationMode,
+      dietPreference,
+      spiceLevel,
+      maxCaloriesPerMeal,
+      servings,
+      difficultyLevel,
+      cookTimeMinutes,
+    });
+    if (!noCache) {
+      const cached = recipeDetailsCache.get(cacheKey);
+      if (cached) {
+        return res.json({ ...cached, cached: true });
+      }
+    }
+
+    // Compact prompt: every line earns its keep. Removed verbose JSON schema
+    // annotations (model knows the shape from the keys + brief hints) and
+    // dropped the duplicated user-input echo since recipeName already covers
+    // it.
+    const styleHint =
       generationMode === 'creative'
-        ? `Writing style: CREATIVE — include tasteful variations (heat level, protein swap, regional twist) where helpful; encourage experimentation while keeping steps clear.`
-        : `Writing style: STRICT — conservative, precise steps; typical quantities (cups/tbsp where sensible); minimal improvisation; focus on repeatable results.`;
+        ? 'creative variations OK'
+        : 'strict, conservative, precise quantities';
+    const difficultyHint =
+      difficultyLevel === 'easy'
+        ? 'easy/beginner-friendly'
+        : difficultyLevel === 'hard'
+          ? 'advanced techniques OK'
+          : 'medium home-cooking';
+    const timeHint = cookTimeMinutes != null ? `, ~${cookTimeMinutes} min total` : '';
 
     const nutritionBlock = buildNutritionConstraints({ dietPreference, spiceLevel, maxCaloriesPerMeal });
 
-    const servingsBlock = `Scale all ingredient amounts for approximately ${servings} servings (${servings} people eating together). Mention approximate yield/servings briefly if helpful.`;
-    const difficultyBlock =
-      difficultyLevel === 'easy'
-        ? 'Keep the recipe EASY: simple workflow, common kitchen tools, minimal prep, beginner-friendly wording.'
-        : difficultyLevel === 'hard'
-          ? 'Keep the recipe HARD: advanced techniques, extra prep, or layered cooking are acceptable if they improve the dish.'
-          : 'Keep the recipe MEDIUM difficulty: practical home-cooking with moderate prep and a few non-trivial steps.';
-    const timeBlock =
-      cookTimeMinutes != null
-        ? `Target total time is about ${cookTimeMinutes} minutes or less including prep where realistic. If needed, favor faster techniques and concise steps.`
-        : '';
+    const prompt = `Create a ${cuisine} recipe "${recipeName}" in ${language}.
+Servings: ${servings}. Style: ${styleHint}; ${difficultyHint}${timeHint}.
+${nutritionBlock ? `Constraints: ${nutritionBlock}` : ''}
 
-    const prompt = `Create a complete ${cuisine} recipe in ${language}.
-Recipe target: "${recipeName}".
-User input context (ingredient or dish): "${userQuery}".
-${servingsBlock}
-${difficultyBlock}
-${timeBlock}
-${modeBlock}
-${nutritionBlock ? `User nutrition preferences (apply to ingredients, substitutions, and steps): ${nutritionBlock}` : ''}
-
-Return STRICT JSON only — no markdown, no commentary, no surrounding text — with EXACTLY this shape:
+Return STRICT JSON only (no markdown/commentary):
 {
-  "dishName": "string in ${language}",
-  "yieldServings": <integer or null, e.g. 4>,
-  "ingredients": [
-    "one ingredient line — include amount + unit + name, e.g. '1.5 lbs flank steak (sliced into 1/4-inch strips)'",
-    "..."
-  ],
-  "steps": [
-    "ONE cooking instruction per array element. NO leading numbering like '1.' or 'Step 1:' — that is added by the UI. NO 'Ingredients:' / 'Instructions:' headers inside steps.",
-    "..."
-  ],
-  "tips": [
-    "Optional short cooking tip. Empty array if none.",
-    "..."
-  ],
-  "imagePrompt": "short english food photo query, include dish name and cuisine",
-  "nutritionEstimate": {
-    "caloriesKcal": <number or null>,
-    "proteinG": <number or null>,
-    "carbsG": <number or null>
-  }
+  "dishName": "in ${language}",
+  "yieldServings": <int or null>,
+  "ingredients": ["amount + unit + name per item"],
+  "steps": ["one self-contained instruction per item, no numbering, no section headers"],
+  "tips": ["optional short tip; empty array if none"],
+  "imagePrompt": "short english food photo query with dish + cuisine",
+  "nutritionEstimate": { "caloriesKcal": <num or null>, "proteinG": <num or null>, "carbsG": <num or null> }
 }
 
-Rules (do NOT violate):
-- "ingredients" and "steps" MUST be arrays of strings, never one big paragraph.
-- Each "steps" element is a single self-contained cooking instruction. Aim for 4–12 steps total.
-- Do NOT prepend numbering ("1.", "1)", "Step 1:") or section headers ("Ingredients:", "Instructions:") inside any element.
-- All user-facing strings use language: ${language}. Numbers and units stay in their natural form.
-- If you cannot honor a constraint, still return valid JSON with the closest reasonable values.`;
+Rules:
+- Arrays only — never one paragraph. 4–12 steps. No "1.", "Step 1:", or "Ingredients:" inside elements.
+- All user-facing strings in ${language}; numbers/units stay natural.`;
 
     const text = await generateText(prompt, 60000);
     if (!text) {
@@ -802,11 +838,12 @@ Rules (do NOT violate):
     });
     const imageUrl = await generateImageFromGeminiWithRetry(imagePrompt, 45000, 3);
     if (!imageUrl) {
+      // Don't cache image failures — they're typically transient.
       return res.status(503).json({
         message: 'Gemini image is temporarily unavailable. Please try again in a moment.',
       });
     }
-    return res.json({
+    const payload = {
       dishName,
       recipe: recipeJoined,
       ingredients: structured.ingredients,
@@ -815,7 +852,9 @@ Rules (do NOT violate):
       yieldServings: structured.yieldServings,
       imageUrl,
       nutritionEstimate,
-    });
+    };
+    recipeDetailsCache.set(cacheKey, payload, TTL_RECIPE_DETAILS);
+    return res.json(payload);
   } catch (error) {
     console.error('recipes/details failed:', error);
     return res.status(500).json({
@@ -840,22 +879,37 @@ app.post('/api/v1/ai/recipes/shopping-list', async (req, res) => {
     }
 
     const servings = coerceServings(rawServings);
-    const servingsHint =
-      servings !== 4
-        ? `The recipe is scaled for about ${servings} people — prefer ingredient quantities consistent with that scale when inferring needs.\n`
-        : '';
+    const servingsHint = servings !== 4 ? `Scaled for ~${servings} people. ` : '';
 
-    // When the client already has the structured ingredient array (post-fix),
-    // ask Gemini to just normalize it (strip amounts/units, merge duplicates).
-    // Otherwise fall back to extracting items from the legacy free-form text.
+    // Cache key prefers the structured ingredient list when present (cheap +
+    // deterministic). Falls back to the recipe text. Either way, identical
+    // input → identical normalized output, so caching is safe.
+    const noCache = req.body?.nocache === true || req.query?.nocache === '1';
+    const cacheKey = canonicalKey('recipes/shopping-list', {
+      dishName,
+      language,
+      servings,
+      ingredients: structuredList.length ? structuredList : null,
+      recipeText: structuredList.length ? null : body.slice(0, 6000),
+    });
+    if (!noCache) {
+      const cached = shoppingListCache.get(cacheKey);
+      if (cached) {
+        return res.json({ ...cached, cached: true });
+      }
+    }
+
+    // Prefer the structured ingredient array (cheap, deterministic). The legacy
+    // free-form fallback is capped at 6k chars to keep input tokens bounded —
+    // recipes never need that much for ingredient extraction.
     const sourceBlock = structuredList.length
-      ? `Ingredient list (already split, one per line):\n${structuredList.slice(0, 80).join('\n')}`
-      : `Recipe text:\n"""\n${body.slice(0, 12000)}\n"""`;
+      ? `Ingredients (one per line):\n${structuredList.slice(0, 80).join('\n')}`
+      : `Recipe:\n"""\n${body.slice(0, 6000)}\n"""`;
 
-    const prompt = `You extract a practical grocery shopping list from a recipe.
-Dish: "${String(dishName).slice(0, 200)}"
-${servingsHint}${sourceBlock}
-Return ONLY a JSON array of strings. Each string is ONE ingredient NAME only for grocery shopping — NO amounts, NO units (no cups, tsp, grams, কাপ, চামচ, কেজি, টি counts). Same language as the recipe (${language}). Merge duplicates (e.g. "onion" twice → once). Order: proteins/main veg first, then spices/pantry, max 35 items.`;
+    const prompt = `Extract a grocery shopping list from this recipe.
+Dish: "${String(dishName).slice(0, 200)}". ${servingsHint}${sourceBlock}
+
+Return ONLY a JSON array of strings. Each string is ONE ingredient NAME ONLY (no amounts, no units like cups/tsp/grams/কাপ/চামচ/কেজি). Language: ${language}. Merge duplicates. Proteins/main veg first, then spices/pantry. Max 35 items.`;
 
     const text = await generateText(prompt, 25000);
     let items = parseStringArrayJson(text || '');
@@ -870,7 +924,9 @@ Return ONLY a JSON array of strings. Each string is ONE ingredient NAME only for
     if (!items.length) {
       return res.status(502).json({ message: 'Could not build shopping list' });
     }
-    return res.json({ items });
+    const payload = { items };
+    shoppingListCache.set(cacheKey, payload, TTL_SHOPPING_LIST);
+    return res.json(payload);
   } catch (error) {
     console.error('recipes/shopping-list failed:', error);
     return res.status(500).json({

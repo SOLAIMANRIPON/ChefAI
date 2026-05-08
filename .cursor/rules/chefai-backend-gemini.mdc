@@ -53,3 +53,20 @@ throws — this prevents generic content from being saved or displayed.
 Keep `recipe` (joined string) for backward compatibility, but the arrays are
 the canonical source. Helpers live in `lib/recipe-structured.ts` and
 `server/index.js` mirror functions.
+
+## Response cache (cost optimization)
+
+`server/cache.js` provides an in-memory `TtlCache` + `canonicalKey` helper.
+
+- `/recipes/list`: 6h TTL — same ingredient/cuisine/constraints repeats often
+- `/recipes/details`: 24h TTL — specific dish + constraints rarely change
+- `/recipes/shopping-list`: 24h TTL — keyed by structured `ingredients[]`
+- Never cache `degraded: true` responses (we want next request to retry)
+- Never cache image-only failures (transient)
+- Clients can bypass with `nocache: true` in body or `?nocache=1` (used by
+  the in-app "regenerate" button)
+- Cache stats exposed at `/api/v1/health` under `cache.{recipeList,...}`
+
+When trimming Gemini prompts, target: drop verbose schema annotations,
+collapse repeated constraint blocks into hint phrases, and never echo data
+already implied by other fields. Quality stays the same; tokens drop ~30%.
