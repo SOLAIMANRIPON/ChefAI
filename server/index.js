@@ -3,6 +3,13 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { TtlCache, canonicalKey } = require('./cache');
+const {
+  billingSnapshot,
+  peekRecipeCharge,
+  canAffordRecipe,
+  ensureWallet,
+  applySuccessfulRecipeCharge,
+} = require('./billing-store');
 
 dotenv.config();
 
@@ -10,7 +17,16 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3-flash-preview').trim();
-const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image').trim();
+const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
+const BILLING_ENABLED = process.env.CHEFAI_BILLING_DISABLED !== '1';
+
+/** Validates ChefAI mobile install ids (`constants/chefai-billing.ts`). */
+function parseChefAiInstallId(req) {
+  const raw = req.headers['x-chefai-install-id'] || req.headers['X-ChefAI-Install-Id'];
+  const trimmed = String(raw || '').trim().toLowerCase();
+  if (!/^[\da-f]{32}$/.test(trimmed)) return null;
+  return trimmed;
+}
 
 // Per-endpoint AI response caches. TTLs picked so popular repeat queries
 // (same ingredient/dish/cuisine combo) skip Gemini entirely while still
@@ -416,7 +432,7 @@ async function generateTextFromImage({ prompt, base64Data, mimeType = 'image/jpe
 const IMAGE_PROMPT_GLOBAL_SUFFIX =
   'ultra realistic food photography, natural soft light, close-up plated dish in a bowl or plate, no text, no watermark, no logos. Species and ingredient fidelity: depict exactly what the dish text describes; when a specific fish or vegetable is named, match that type — do not substitute a different species or a generic look-alike; for small river fish curries show small whole fish or typical small-fish cuts, not thick circular steaks from large carps unless the dish is explicitly large carp (rohu, katla).';
 
-async function generateImageFromGemini(imagePrompt, timeoutMs = 45000) {
+async function generateImageFromGemini(imagePrompt, timeoutMs = 22000) {
   if (!GEMINI_API_KEY) return null;
   const finalPrompt = `${imagePrompt}, ${IMAGE_PROMPT_GLOBAL_SUFFIX}`;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -448,7 +464,9 @@ async function generateImageFromGemini(imagePrompt, timeoutMs = 45000) {
   return Promise.race([request, timeout]);
 }
 
-async function generateImageFromGeminiWithRetry(imagePrompt, timeoutMs = 45000, maxAttempts = 3) {
+async function generateImageFromGeminiWithRetry(imagePrompt) {
+  const timeoutMs = 22000;
+  const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const imageUrl = await generateImageFromGemini(imagePrompt, timeoutMs);
@@ -514,6 +532,7 @@ app.get('/api/v1/health', (_req, res) => {
     geminiConfigured: Boolean(GEMINI_API_KEY),
     textModel: GEMINI_TEXT_MODEL,
     imageModel: GEMINI_IMAGE_MODEL,
+    billingEnabled: BILLING_ENABLED,
     timestamp: new Date().toISOString(),
     cache: {
       recipeList: recipeListCache.stats(),
@@ -521,6 +540,25 @@ app.get('/api/v1/health', (_req, res) => {
       shoppingList: shoppingListCache.stats(),
     },
   });
+});
+
+app.get('/api/v1/billing/state', (req, res) => {
+  if (!BILLING_ENABLED) {
+    return res.json({
+      credits: 999999,
+      creditCostTextRecipe: 1,
+      creditCostPhotoRecipe: 3,
+      billingDisabled: true,
+    });
+  }
+  const installId = parseChefAiInstallId(req);
+  if (!installId) {
+    return res.status(400).json({
+      message: 'Missing or invalid X-ChefAI-Install-Id header (expected 32 hex characters).',
+    });
+  }
+  const wallet = ensureWallet(installId);
+  res.json({ ...billingSnapshot(wallet), billingDisabled: false });
 });
 
 /** Community feed — same shape as app `CommunityPost`; extend or replace with DB later */
@@ -687,17 +725,30 @@ app.post('/api/v1/ai/recipes/details', async (req, res) => {
       servings: rawServings,
       difficultyLevel: rawDifficultyLevel,
       cookTimeMinutes: rawCookTimeMinutes,
+      includeImage: rawIncludeImage,
     } = req.body || {};
+
+    const includeImage =
+      rawIncludeImage === undefined || rawIncludeImage === null ? true : Boolean(rawIncludeImage);
+
+    let installId = null;
+    if (BILLING_ENABLED) {
+      installId = parseChefAiInstallId(req);
+      if (!installId) {
+        return res.status(400).json({
+          message: 'Missing or invalid X-ChefAI-Install-Id header (expected 32 hex characters).',
+        });
+      }
+    }
+
     const generationMode = normalizeGenerationMode(rawMode);
     const userQuery = String(query || ingredient || '').trim();
     const servings = coerceServings(rawServings);
     const difficultyLevel = normalizeDifficultyLevel(rawDifficultyLevel);
     const cookTimeMinutes = coerceCookTimeMinutes(rawCookTimeMinutes);
 
-    // Cache hit = zero Gemini cost. Identical request inputs (same recipe
-    // name + cuisine + language + constraints) reliably want the same output.
     const noCache = req.body?.nocache === true || req.query?.nocache === '1';
-    const cacheKey = canonicalKey('recipes/details', {
+    const cachePayload = {
       recipeName,
       userQuery,
       cuisine,
@@ -709,11 +760,35 @@ app.post('/api/v1/ai/recipes/details', async (req, res) => {
       servings,
       difficultyLevel,
       cookTimeMinutes,
-    });
+      includeImage,
+      ...(BILLING_ENABLED ? { installId } : {}),
+    };
+    const cacheKey = canonicalKey('recipes/details', cachePayload);
     if (!noCache) {
       const cached = recipeDetailsCache.get(cacheKey);
       if (cached) {
-        return res.json({ ...cached, cached: true });
+        const billingPayload =
+          BILLING_ENABLED && installId ? billingSnapshot(ensureWallet(installId)) : undefined;
+        return res.json({
+          ...cached,
+          cached: true,
+          ...(billingPayload ? { billing: billingPayload } : {}),
+        });
+      }
+    }
+
+    if (BILLING_ENABLED && installId) {
+      const wallet = ensureWallet(installId);
+      const snapshotBefore = billingSnapshot(wallet);
+      if (!canAffordRecipe(includeImage, wallet)) {
+        const { creditCost } = peekRecipeCharge(includeImage, wallet);
+        return res.status(403).json({
+          code: 'INSUFFICIENT_CREDITS',
+          message: `You need ${creditCost} credit(s) for this option.`,
+          creditCost,
+          includeImage,
+          ...snapshotBefore,
+        });
       }
     }
 
@@ -836,14 +911,21 @@ Rules:
       queryText: userQuery,
       basePrompt: rawImagePrompt,
     });
-    const imageUrl = await generateImageFromGeminiWithRetry(imagePrompt, 45000, 3);
-    if (!imageUrl) {
-      // Don't cache image failures — they're typically transient.
-      return res.status(503).json({
-        message: 'Gemini image is temporarily unavailable. Please try again in a moment.',
-      });
+    let imageUrl = '';
+    if (includeImage) {
+      imageUrl = await generateImageFromGeminiWithRetry(imagePrompt);
+      if (!imageUrl) {
+        return res.status(503).json({
+          message: 'Gemini image is temporarily unavailable. Please try again in a moment.',
+          ...(BILLING_ENABLED && installId ? { billing: billingSnapshot(ensureWallet(installId)) } : {}),
+        });
+      }
     }
-    const payload = {
+
+    const billingAfter =
+      BILLING_ENABLED && installId ? applySuccessfulRecipeCharge(installId, includeImage) : undefined;
+
+    const payloadForCache = {
       dishName,
       recipe: recipeJoined,
       ingredients: structured.ingredients,
@@ -853,8 +935,11 @@ Rules:
       imageUrl,
       nutritionEstimate,
     };
-    recipeDetailsCache.set(cacheKey, payload, TTL_RECIPE_DETAILS);
-    return res.json(payload);
+    recipeDetailsCache.set(cacheKey, payloadForCache, TTL_RECIPE_DETAILS);
+    return res.json({
+      ...payloadForCache,
+      ...(billingAfter ? { billing: billingAfter } : {}),
+    });
   } catch (error) {
     console.error('recipes/details failed:', error);
     return res.status(500).json({

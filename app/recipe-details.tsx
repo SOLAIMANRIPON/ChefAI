@@ -19,9 +19,14 @@ import {
   readStructuredRecipeFromPayload,
   type StructuredRecipe,
 } from '@/lib/recipe-structured';
+import {
+  CHEFAI_INSTALL_HEADER,
+  getOrCreateChefAiInstallId,
+  type RecipeBillingSnapshot,
+} from '@/constants/chefai-billing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -112,6 +117,10 @@ export default function RecipeDetailsScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [nutrition, setNutrition] = useState<NutritionEstimate>(EMPTY_NUTRITION);
+  const [installId, setInstallId] = useState<string | null>(null);
+  const [billing, setBilling] = useState<RecipeBillingSnapshot | null>(null);
+  const [awaitingPlanChoice, setAwaitingPlanChoice] = useState(false);
+  const installIdRef = useRef<string | null>(null);
 
   const sectionLabels = getRecipeSectionLabels(selectedLang);
 
@@ -192,7 +201,22 @@ export default function RecipeDetailsScreen() {
     }
   };
 
-  const fetchRecipeDetailsFromBackend = useCallback(async () => {
+  const fetchRecipeBillingSnapshot = useCallback(async (deviceInstallId: string) => {
+    if (!API_BASE_URL) return;
+    const response = await fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/billing/state`,
+      { headers: { [CHEFAI_INSTALL_HEADER]: deviceInstallId } },
+      20000
+    );
+    if (!response.ok) {
+      throw new Error(`Billing request failed (${response.status})`);
+    }
+    const data = await response.json();
+    setBilling(data as RecipeBillingSnapshot);
+  }, []);
+
+  const fetchRecipeDetailsFromBackend = useCallback(
+    async (deviceInstallId: string, includeImage: boolean) => {
     if (!API_BASE_URL) {
       throw new Error('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
     }
@@ -203,7 +227,10 @@ export default function RecipeDetailsScreen() {
         `${API_BASE_URL}/api/v1/ai/recipes/details`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            [CHEFAI_INSTALL_HEADER]: deviceInstallId,
+          },
           body: JSON.stringify({
             recipeName,
             query: ingredient,
@@ -217,6 +244,7 @@ export default function RecipeDetailsScreen() {
             ...(cookTimeMinutes != null ? { cookTimeMinutes } : {}),
             ...(maxCaloriesPerMeal != null ? { maxCaloriesPerMeal } : {}),
             servings,
+            includeImage,
           }),
         },
         // Server may take up to ~135s in the worst case (2 Gemini attempts at
@@ -235,6 +263,9 @@ export default function RecipeDetailsScreen() {
       try {
         const errorJson = await response.json();
         if (typeof errorJson?.message === 'string') message = errorJson.message;
+        if (response.status === 403 && typeof errorJson?.credits === 'number') {
+          setBilling(errorJson as RecipeBillingSnapshot);
+        }
       } catch {
         // Ignore parsing error for non-json responses.
       }
@@ -242,6 +273,9 @@ export default function RecipeDetailsScreen() {
     }
 
     const data = await response.json();
+    if (data?.billing && typeof data.billing === 'object') {
+      setBilling(data.billing as RecipeBillingSnapshot);
+    }
     if (data?.degraded === true) {
       const degradedMessage =
         typeof data?.message === 'string' && data.message.trim()
@@ -277,24 +311,29 @@ export default function RecipeDetailsScreen() {
       throw new Error('No recipe details returned from backend');
     }
     return { name, instructions, structured: structuredFromBackend, generatedImageUrl, nutritionEstimate };
-  }, [
-    recipeName,
-    ingredient,
-    selectedCuisine,
-    selectedLang,
-    generationMode,
-    dietPreference,
-    spiceLevel,
-    maxCaloriesPerMeal,
-    servings,
-    difficultyLevel,
-    cookTimeMinutes,
-  ]);
+  },
+    [
+      recipeName,
+      ingredient,
+      selectedCuisine,
+      selectedLang,
+      generationMode,
+      dietPreference,
+      spiceLevel,
+      maxCaloriesPerMeal,
+      servings,
+      difficultyLevel,
+      cookTimeMinutes,
+    ]
+  );
 
-  useEffect(() => {
-    const loadRecipe = async () => {
-      const cacheKey = `${generationMode}__${dietPreference}__${spiceLevel}__${difficultyLevel}__${cookTimeMinutes ?? ''}__${maxCaloriesPerMeal ?? ''}__${servings}__${selectedCuisine}__${selectedLang}__${ingredient.trim().toLowerCase()}__${recipeName}`;
+  const runRecipeGeneration = useCallback(
+    async (includeImage: boolean) => {
+      const deviceId = installIdRef.current;
+      if (!deviceId) return;
+      const cacheKey = `${generationMode}__${dietPreference}__${spiceLevel}__${difficultyLevel}__${cookTimeMinutes ?? ''}__${maxCaloriesPerMeal ?? ''}__${servings}__${selectedCuisine}__${selectedLang}__${ingredient.trim().toLowerCase()}__${recipeName}__img:${includeImage}`;
 
+      setAwaitingPlanChoice(false);
       setLoading(true);
       setErrorMessage('');
       setRecipe('');
@@ -303,6 +342,64 @@ export default function RecipeDetailsScreen() {
       setNutrition(EMPTY_NUTRITION);
       setImageError(false);
       setImageFallbackTried(false);
+
+      try {
+        const { name, instructions, structured: backendStructured, generatedImageUrl, nutritionEstimate } =
+          await fetchRecipeDetailsFromBackend(deviceId, includeImage);
+
+        setDishName(name);
+        setStructured(backendStructured);
+        setRecipe(instructions);
+        setImageUrl(generatedImageUrl);
+        setNutrition(nutritionEstimate);
+        await saveRecentView(name);
+        recipeDetailsCache[cacheKey] = {
+          dishName: name,
+          recipe: instructions,
+          imageUrl: generatedImageUrl,
+          nutrition: nutritionEstimate,
+          structured: backendStructured,
+        };
+      } catch (error) {
+        console.error(error);
+        if (error instanceof Error) {
+          setErrorMessage(error.message);
+        } else {
+          setErrorMessage('রেসিপি লোড করা যায়নি। দয়া করে আবার চেষ্টা করুন।');
+        }
+        setAwaitingPlanChoice(true);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      cookTimeMinutes,
+      difficultyLevel,
+      dietPreference,
+      fetchRecipeDetailsFromBackend,
+      generationMode,
+      ingredient,
+      maxCaloriesPerMeal,
+      recipeName,
+      saveRecentView,
+      selectedCuisine,
+      selectedLang,
+      servings,
+      spiceLevel,
+    ]
+  );
+
+  useEffect(() => {
+    const loadRecipe = async () => {
+      setLoading(true);
+      setErrorMessage('');
+      setRecipe('');
+      setStructured(EMPTY_STRUCTURED);
+      setImageUrl('');
+      setNutrition(EMPTY_NUTRITION);
+      setImageError(false);
+      setImageFallbackTried(false);
+      setAwaitingPlanChoice(false);
 
       try {
         if (recipeId) {
@@ -334,22 +431,15 @@ export default function RecipeDetailsScreen() {
           }
         }
 
-        const { name, instructions, structured: backendStructured, generatedImageUrl, nutritionEstimate } =
-          await fetchRecipeDetailsFromBackend();
+        if (!API_BASE_URL) {
+          throw new Error('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
+        }
 
-        setDishName(name);
-        setStructured(backendStructured);
-        setRecipe(instructions);
-        setImageUrl(generatedImageUrl);
-        setNutrition(nutritionEstimate);
-        await saveRecentView(name);
-        recipeDetailsCache[cacheKey] = {
-          dishName: name,
-          recipe: instructions,
-          imageUrl: generatedImageUrl,
-          nutrition: nutritionEstimate,
-          structured: backendStructured,
-        };
+        const id = await getOrCreateChefAiInstallId();
+        installIdRef.current = id;
+        setInstallId(id);
+        await fetchRecipeBillingSnapshot(id);
+        setAwaitingPlanChoice(true);
       } catch (error) {
         console.error(error);
         if (error instanceof Error) {
@@ -364,8 +454,9 @@ export default function RecipeDetailsScreen() {
 
     loadRecipe();
   }, [
-    ingredient,
+    recipeId,
     recipeName,
+    ingredient,
     selectedCuisine,
     selectedLang,
     generationMode,
@@ -375,10 +466,33 @@ export default function RecipeDetailsScreen() {
     servings,
     difficultyLevel,
     cookTimeMinutes,
-    recipeId,
-    fetchRecipeDetailsFromBackend,
-    saveRecentView,
+    fetchRecipeBillingSnapshot,
   ]);
+
+  const onChooseTextPlan = useCallback(() => {
+    void runRecipeGeneration(false);
+  }, [runRecipeGeneration]);
+
+  const onChoosePhotoPlan = useCallback(() => {
+    void runRecipeGeneration(true);
+  }, [runRecipeGeneration]);
+
+  const onBuyCreditsPress = useCallback(() => {
+    Alert.alert(
+      'Buy credits',
+      'Google Play in-app purchases will be available in a future update. Each credit is worth about USD~0.05.',
+      [{ text: 'OK' }]
+    );
+  }, []);
+
+  const onYourCreditsPress = useCallback(() => {
+    if (!billing) return;
+    Alert.alert(
+      'Your credits',
+      `Balance: ${billing.credits} credits.\nText recipe: ${billing.creditCostTextRecipe ?? 1} credit each.\nPhoto recipe: ${billing.creditCostPhotoRecipe ?? 3} credits each.`,
+      [{ text: 'OK' }]
+    );
+  }, [billing]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -399,12 +513,66 @@ export default function RecipeDetailsScreen() {
           {`  |  Difficulty: ${difficultyLevel}`}
           {cookTimeMinutes != null ? `  |  Time: ${cookTimeMinutes} min` : ''}
         </Text>
+        {awaitingPlanChoice ? (
+          <Text style={[styles.dishTitle, styles.planGateDishTitle]} accessibilityRole="header">
+            {(recipeName.trim() || dishName).trim() || 'Recipe'}
+          </Text>
+        ) : null}
+        {awaitingPlanChoice && installId && billing ? (
+          <View style={styles.planChoiceCard}>
+            <Text style={styles.planChoiceTitle}>Choose how to generate</Text>
+            <Text style={styles.planChoiceHint}>
+              Text recipe uses 1 credit (USD~0.05). Photo recipe uses 3 credits (USD~0.15). When credits reach 0, tap
+              Buy credits to top up.
+            </Text>
+            <TouchableOpacity
+              style={styles.planOption}
+              onPress={onChooseTextPlan}
+              accessibilityRole="button"
+              accessibilityHint={`Costs ${billing.creditCostTextRecipe ?? 1} credit, about USD~0.05`}>
+              <Text style={styles.planOptionTitle}>Go with only text recipe</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.planOption}
+              onPress={onChoosePhotoPlan}
+              accessibilityRole="button"
+              accessibilityHint={`Costs ${billing.creditCostPhotoRecipe ?? 3} credits, about USD~0.15`}>
+              <Text style={styles.planOptionTitle}>Go with photo recipe</Text>
+            </TouchableOpacity>
+            <View style={styles.planFooterButtons}>
+              <TouchableOpacity
+                style={styles.planFooterButton}
+                onPress={onYourCreditsPress}
+                accessibilityRole="button"
+                accessibilityLabel={`Your credits, balance ${billing.credits}`}>
+                <Text style={styles.planFooterButtonLabel}>Your credits</Text>
+                <Text style={styles.planFooterButtonValue}>{billing.credits}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.planFooterButton, styles.planFooterButtonCompact]}
+                onPress={onBuyCreditsPress}
+                accessibilityRole="button">
+                <Text style={styles.planFooterButtonLabel}>Buy credits</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+        {awaitingPlanChoice && errorMessage ? (
+          <Text style={[styles.errorText, { alignSelf: 'stretch', marginBottom: 12 }]}>{errorMessage}</Text>
+        ) : null}
+        {!awaitingPlanChoice ? (
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.saveButton} onPress={saveRecipe} disabled={saving || loading || !recipe}>
+          <TouchableOpacity
+            style={styles.saveButton}
+            onPress={saveRecipe}
+            disabled={saving || loading || !recipe}>
             <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.cookModeButton, (loading || !recipe) && styles.cookModeButtonDisabled]}
+            style={[
+              styles.cookModeButton,
+              (loading || !recipe) && styles.cookModeButtonDisabled,
+            ]}
             onPress={openCookMode}
             disabled={loading || !recipe}
             accessibilityRole="button"
@@ -412,13 +580,14 @@ export default function RecipeDetailsScreen() {
             <Text style={styles.cookModeButtonText}>Cook mode</Text>
           </TouchableOpacity>
         </View>
+        ) : null}
 
         {loading ? (
           <View style={styles.loaderWrap}>
             <ActivityIndicator size="large" color="#d3b275" />
             <Text style={styles.loaderText}>Recipe loading...</Text>
           </View>
-        ) : (
+        ) : awaitingPlanChoice ? null : (
           <>
             {imageUrl && !imageError ? (
               <Image
@@ -534,6 +703,74 @@ const styles = StyleSheet.create({
   },
   backButtonText: { color: '#d3b275', fontSize: 14, fontWeight: '600' },
   summaryText: { alignSelf: 'flex-start', color: '#9a9a9a', fontSize: 12, marginBottom: 14 },
+  planChoiceCard: {
+    width: '100%',
+    backgroundColor: '#121212',
+    borderWidth: 1,
+    borderColor: '#2e2e2e',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    gap: 12,
+  },
+  planChoiceTitle: {
+    color: '#d3b275',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  planChoiceHint: {
+    color: '#888',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 17,
+    marginBottom: 4,
+  },
+  planOption: {
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planOptionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    alignSelf: 'stretch',
+  },
+  planFooterButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+    alignSelf: 'stretch',
+  },
+  planFooterButton: {
+    flex: 1,
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: '#555',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planFooterButtonCompact: {
+    paddingVertical: 14,
+  },
+  planFooterButtonLabel: { color: '#d3b275', fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  planFooterButtonValue: {
+    color: '#e8e8e8',
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 4,
+    textAlign: 'center',
+  },
   actionRow: {
     alignSelf: 'stretch',
     flexDirection: 'row',
@@ -576,6 +813,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 15,
     textAlign: 'center',
+  },
+  planGateDishTitle: {
+    alignSelf: 'stretch',
+    marginTop: 4,
   },
   recipeCard: { width: '100%', backgroundColor: '#111', padding: 25, borderRadius: 20, marginBottom: 20 },
   recipeText: { color: '#ddd', fontSize: 16, lineHeight: 26 },

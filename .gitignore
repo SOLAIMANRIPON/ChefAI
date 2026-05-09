@@ -44,6 +44,9 @@ yarn-error.*
 
 app-example
 
+# Local billing ledger (dev / single-node server)
+server/data/billing.json
+
 # generated native folders
 /ios
 /android

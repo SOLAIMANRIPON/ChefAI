@@ -33,8 +33,6 @@ import {
   parseServingsParam,
 } from '@/constants/recipe-preferences';
 
-const DAILY_FREE_LIMIT = 5;
-const DAILY_USAGE_STORAGE_KEY = 'chefai_daily_usage_v1';
 const RECENT_SEARCHES_STORAGE_KEY = 'chefai_recent_searches_v1';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 const RECIPE_LIST_FETCH_MS = 60000;
@@ -68,122 +66,92 @@ function cleanIngredientInput(raw: string): string {
 const uiTranslations: Record<
   string,
   {
-    freeRemainingLabel: string;
     ingredientPlaceholder: string;
-    freeLimitEnded: string;
     modeSectionLabel: string;
     strictModeLabel: string;
     creativeModeLabel: string;
   }
 > = {
   বাংলা: {
-    freeRemainingLabel: 'আজ ফ্রি বাকি',
     ingredientPlaceholder: 'উপকরণের নাম অথবা খাবারের নাম লিখুন...',
-    freeLimitEnded: 'আজকের ৫টি ফ্রি রিকোয়েস্ট শেষ। আরও ব্যবহার করতে ক্রেডিট/সাবস্ক্রিপশন নিন।',
     modeSectionLabel: 'রেসিপি মোড',
     strictModeLabel: 'নির্ভুল',
     creativeModeLabel: 'সৃজনশীল',
   },
   English: {
-    freeRemainingLabel: 'Free left today',
     ingredientPlaceholder: 'Enter ingredient or dish name...',
-    freeLimitEnded: 'Today\'s 5 free requests are used up. Buy credits or subscribe to continue.',
     modeSectionLabel: 'Recipe mode',
     strictModeLabel: 'Strict',
     creativeModeLabel: 'Creative',
   },
   Hindi: {
-    freeRemainingLabel: 'आज फ्री बाकी',
     ingredientPlaceholder: 'सामग्री या डिश का नाम लिखें...',
-    freeLimitEnded: 'आज की 5 फ्री रिक्वेस्ट खत्म हो गई हैं। आगे बढ़ने के लिए क्रेडिट या सब्सक्रिप्शन लें।',
     modeSectionLabel: 'रेसिपी मोड',
     strictModeLabel: 'सटीक',
     creativeModeLabel: 'रचनात्मक',
   },
   Arabic: {
-    freeRemainingLabel: 'المتبقي المجاني اليوم',
     ingredientPlaceholder: 'اكتب اسم المكون او اسم الطبق...',
-    freeLimitEnded: 'انتهت 5 طلباتك المجانية لليوم. اشترِ رصيدًا أو اشترك للمتابعة.',
     modeSectionLabel: 'وضع الوصفة',
     strictModeLabel: 'دقيق',
     creativeModeLabel: 'إبداعي',
   },
   French: {
-    freeRemainingLabel: 'Gratuit restant aujourd\'hui',
     ingredientPlaceholder: 'Entrez le nom d\'un ingredient ou d\'un plat...',
-    freeLimitEnded: 'Vos 5 requetes gratuites du jour sont terminees. Achetez des credits ou abonnez-vous.',
     modeSectionLabel: 'Mode recette',
     strictModeLabel: 'Precis',
     creativeModeLabel: 'Creatif',
   },
   Spanish: {
-    freeRemainingLabel: 'Gratis restante hoy',
     ingredientPlaceholder: 'Escribe el nombre del ingrediente o del plato...',
-    freeLimitEnded: 'Tus 5 solicitudes gratis de hoy se han agotado. Compra creditos o suscribete para continuar.',
     modeSectionLabel: 'Modo receta',
     strictModeLabel: 'Estricto',
     creativeModeLabel: 'Creativo',
   },
   Urdu: {
-    freeRemainingLabel: 'آج فری باقی',
     ingredientPlaceholder: 'اجزاء کا نام یا کھانے کا نام لکھیں...',
-    freeLimitEnded: 'آج کی 5 فری درخواستیں ختم ہو چکی ہیں۔ مزید کے لیے کریڈٹ خریدیں یا سبسکرائب کریں۔',
     modeSectionLabel: 'ریسیپی موڈ',
     strictModeLabel: 'درست',
     creativeModeLabel: 'تخلیقی',
   },
   Japanese: {
-    freeRemainingLabel: '本日の無料残り',
     ingredientPlaceholder: '材料名または料理名を入力してください...',
-    freeLimitEnded: '本日の無料5回分は終了しました。続行するにはクレジット購入または登録してください。',
     modeSectionLabel: 'レシピモード',
     strictModeLabel: '厳密',
     creativeModeLabel: 'クリエイティブ',
   },
   Chinese: {
-    freeRemainingLabel: '今日剩余免费次数',
     ingredientPlaceholder: '请输入食材名称或菜名...',
-    freeLimitEnded: '今天的5次免费请求已用完。请购买额度或订阅继续使用。',
     modeSectionLabel: '食谱模式',
     strictModeLabel: '严谨',
     creativeModeLabel: '创意',
   },
   Korean: {
-    freeRemainingLabel: '오늘 남은 무료 횟수',
     ingredientPlaceholder: '재료 이름 또는 음식 이름을 입력하세요...',
-    freeLimitEnded: '오늘의 무료 5회 요청을 모두 사용했습니다. 계속하려면 크레딧 구매 또는 구독이 필요합니다.',
     modeSectionLabel: '레시피 모드',
     strictModeLabel: '정확',
     creativeModeLabel: '창의',
   },
   Turkish: {
-    freeRemainingLabel: 'Bugun kalan ucretsiz hak',
     ingredientPlaceholder: 'Malzeme veya yemek adini yazin...',
-    freeLimitEnded: 'Bugunku 5 ucretsiz istek doldu. Devam etmek icin kredi satin alin veya abone olun.',
     modeSectionLabel: 'Tarif modu',
     strictModeLabel: 'Kesin',
     creativeModeLabel: 'Yaratici',
   },
   Persian: {
-    freeRemainingLabel: 'باقی مانده رایگان امروز',
     ingredientPlaceholder: 'نام ماده يا نام غذا را وارد کنيد...',
-    freeLimitEnded: '۵ درخواست رايگان امروز تمام شده است. براي ادامه اعتبار خريداري کنيد يا اشتراک بگيريد.',
     modeSectionLabel: 'حالت دستور',
     strictModeLabel: 'دقیق',
     creativeModeLabel: 'خلاقانه',
   },
   Portuguese: {
-    freeRemainingLabel: 'Gratis restante hoje',
     ingredientPlaceholder: 'Digite o nome do ingrediente ou do prato...',
-    freeLimitEnded: 'As 5 solicitacoes gratis de hoje acabaram. Compre creditos ou assine para continuar.',
     modeSectionLabel: 'Modo receita',
     strictModeLabel: 'Rigoroso',
     creativeModeLabel: 'Criativo',
   },
   Greek: {
-    freeRemainingLabel: 'Δωρεαν υπολοιπο σημερα',
     ingredientPlaceholder: 'Γραψτε ονομα υλικου ή φαγητου...',
-    freeLimitEnded: 'Οι 5 δωρεαν αιτησεις της ημερας τελειωσαν. Αγοραστε πιστωσεις ή κανετε συνδρομη.',
     modeSectionLabel: 'Λειτουργια συνταγης',
     strictModeLabel: 'Ακριβης',
     creativeModeLabel: 'Δημιουργικο',
@@ -312,7 +280,6 @@ export default function CraftScreen() {
   const [maxCaloriesInput, setMaxCaloriesInput] = useState('');
   const [servingsInput, setServingsInput] = useState('4');
 
-  const [freeUsedToday, setFreeUsedToday] = useState(0);
   const [recognizingIngredients, setRecognizingIngredients] = useState(false);
   const [showVoiceFallbackHint, setShowVoiceFallbackHint] = useState(false);
   const ingredientInputRef = React.useRef<TextInput>(null);
@@ -320,62 +287,6 @@ export default function CraftScreen() {
   const resolvedLanguage = languageAliasByCountry[selectedLang] ?? selectedLang;
   const uiText = uiTranslations[resolvedLanguage] ?? uiTranslations['English'];
   const dsUi = dietSpiceUi[resolvedLanguage as keyof typeof dietSpiceUi] ?? dietSpiceUi.English;
-
-  const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
-
-  const loadDailyUsage = React.useCallback(async () => {
-    try {
-      const raw = await AsyncStorage.getItem(DAILY_USAGE_STORAGE_KEY);
-      if (!raw) {
-        setFreeUsedToday(0);
-        return;
-      }
-      const parsed = JSON.parse(raw) as { date?: string; used?: number };
-      if (parsed?.date === getTodayDateKey()) {
-        setFreeUsedToday(typeof parsed.used === 'number' ? parsed.used : 0);
-      } else {
-        setFreeUsedToday(0);
-      }
-    } catch {
-      setFreeUsedToday(0);
-    }
-  }, []);
-
-  const consumeFreeUsage = async () => {
-    const nextUsed = freeUsedToday + 1;
-    setFreeUsedToday(nextUsed);
-    try {
-      await AsyncStorage.setItem(
-        DAILY_USAGE_STORAGE_KEY,
-        JSON.stringify({
-          date: getTodayDateKey(),
-          used: nextUsed,
-        })
-      );
-    } catch {
-      // If persistence fails, in-memory count still protects the current session.
-    }
-  };
-
-  const resetDailyUsageForDev = async () => {
-    try {
-      await AsyncStorage.setItem(
-        DAILY_USAGE_STORAGE_KEY,
-        JSON.stringify({
-          date: getTodayDateKey(),
-          used: 0,
-        })
-      );
-      setFreeUsedToday(0);
-      setErrorMessage('');
-    } catch {
-      // Ignore reset errors in dev helper.
-    }
-  };
-
-  React.useEffect(() => {
-    void loadDailyUsage();
-  }, [loadDailyUsage]);
 
   React.useEffect(() => {
     if (typeof params.ingredient === 'string' && params.ingredient.trim()) {
@@ -629,7 +540,6 @@ export default function CraftScreen() {
           cookTimeMinutes: cookTimeMinutes != null ? String(cookTimeMinutes) : '',
         },
       });
-      await consumeFreeUsage();
     } catch (error: any) {
       if (!isAbortError(error)) {
         console.error(error);
@@ -656,11 +566,6 @@ export default function CraftScreen() {
     if (normalizedIngredient !== ingredient) {
       setIngredient(normalizedIngredient);
     }
-    if (freeUsedToday >= DAILY_FREE_LIMIT) {
-      setErrorMessage(uiText.freeLimitEnded);
-      return;
-    }
-
     const trimmed = normalizedIngredient;
     const conflict = analyzeDietInputConflict(dietPreference, trimmed);
     if (!conflict.ok) {
@@ -816,9 +721,6 @@ export default function CraftScreen() {
         </View>
 
         <View style={styles.inputCard}>
-          <Text style={styles.limitText}>
-            {uiText.freeRemainingLabel}: {Math.max(DAILY_FREE_LIMIT - freeUsedToday, 0)} / {DAILY_FREE_LIMIT}
-          </Text>
           <TextInput
             ref={ingredientInputRef}
             style={styles.input}
@@ -863,11 +765,6 @@ export default function CraftScreen() {
           <TouchableOpacity style={styles.button} onPress={handleStartCooking} disabled={loading || recognizingIngredients}>
             {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.buttonText}>CRAFT RECIPE</Text>}
           </TouchableOpacity>
-          {__DEV__ ? (
-            <TouchableOpacity style={styles.devResetBtn} onPress={resetDailyUsageForDev}>
-              <Text style={styles.devResetBtnText}>Reset Free Limit (Dev)</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
 
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
@@ -936,7 +833,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
   },
   inputCard: { width: '100%', backgroundColor: '#111', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#222', marginBottom: 25 },
-  limitText: { color: '#9f9f9f', fontSize: 12, marginBottom: 8 },
   input: { color: '#fff', fontSize: 16, borderBottomWidth: 1, borderBottomColor: '#333', paddingVertical: 12, marginBottom: 25 },
   voiceButton: {
     borderWidth: 1,
@@ -972,14 +868,5 @@ const styles = StyleSheet.create({
   },
   scanButtonDisabled: { opacity: 0.65 },
   scanButtonText: { color: '#d3b275', fontSize: 13, fontWeight: '700', letterSpacing: 1, textAlign: 'center' },
-  devResetBtn: {
-    marginTop: 10,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#444',
-    alignItems: 'center',
-  },
-  devResetBtnText: { color: '#bdbdbd', fontSize: 12, fontWeight: '600' },
   errorText: { color: '#ff7f7f', fontSize: 14, marginTop: 6, marginBottom: 8, textAlign: 'center' },
 });
