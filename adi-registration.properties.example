@@ -1,0 +1,6 @@
+# Copy Play Console → Android developer verification → Sign and upload an APK → Snippet
+# Save this file as adi-registration.properties (same folder as package.json) with ONLY that line.
+# Example format (yours will be different):
+# DYP4042HYYOFUAAAAAAAAAAAAAA
+
+PASTE_PLAY_CONSOLE_SNIPPET_HERE

@@ -16,7 +16,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://chefai-backend-jgth.onrender.com",
-        "EXPO_PUBLIC_PLAY_CREDITS_PRODUCT_IDS": "chefai_credits_small,chefai_credits_pack,chefai_credits_large"
+        "EXPO_PUBLIC_PLAY_CREDITS_PRODUCT_IDS": "chefai_credits_small,chefai_credits_pack,chefai_credits_large",
+        "GOOGLE_PLAY_ADI_REGISTRATION_SNIPPET": "DYP4O42HYYOFUAAAAAAAAAAAAA"
       }
     },
     "production": {

@@ -39,6 +39,9 @@ yarn-error.*
 !.env.example
 .env*.local
 
+# Play Console package-verification snippet (unique per package; copy from Play UI)
+adi-registration.properties
+
 # typescript
 *.tsbuildinfo
 
