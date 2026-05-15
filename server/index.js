@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { TtlCache, canonicalKey } = require('./cache');
 const {
@@ -569,6 +570,15 @@ const buildDishSpecificImagePrompt = ({ dishName, cuisine, queryText, basePrompt
 
 app.get('/', (_req, res) => {
   res.type('text/plain').send('ChefAI backend is running. Check GET /api/v1/health for status.');
+});
+
+/** Public privacy policy for Google Play (also mirrored on GitHub Pages). */
+const privacyHtmlPath = path.join(__dirname, '..', 'docs', 'privacy.html');
+app.get('/privacy', (_req, res) => {
+  res.sendFile(privacyHtmlPath);
+});
+app.get('/privacy.html', (_req, res) => {
+  res.sendFile(privacyHtmlPath);
 });
 
 app.get('/api/v1/health', (_req, res) => {
