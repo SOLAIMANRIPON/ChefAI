@@ -20,10 +20,17 @@ import {
   type StructuredRecipe,
 } from '@/lib/recipe-structured';
 import {
+  ensureLocalImageFileForGallery,
+  ensureShareableRecipeImage,
+  persistableHttpImageUrl,
+  resolveRecipeCoverForSave,
+} from '@/lib/resolve-recipe-cover-for-save';
+import {
   CHEFAI_INSTALL_HEADER,
   getOrCreateChefAiInstallId,
   type RecipeBillingSnapshot,
 } from '@/constants/chefai-billing';
+import { estimatedUsdPerCredit, getPlayCreditPacks } from '@/constants/play-credit-packs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -31,15 +38,27 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  SafeAreaView,
+  Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+
+/** `react-native-share` needs `file://` / `content://` URIs; bare cache paths may not attach correctly. */
+function toShareableFileUrl(pathOrUri: string): string {
+  const s = pathOrUri.trim();
+  if (!s) return s;
+  if (s.startsWith('file://') || s.startsWith('content://')) return s;
+  return s.startsWith('/') ? `file://${s}` : `file:///${s}`;
+}
+
 const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
 // Locked timeout/retry policy for production stability.
 type NutritionEstimate = { caloriesKcal: number | null; proteinG: number | null; carbsG: number | null };
@@ -66,15 +85,6 @@ const cleanRecipeText = (text: string) =>
     .replace(/^\s*[-*]\s+/gm, '• ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-
-/** Base64 data URLs are huge and break AsyncStorage / localStorage quota; keep only short http(s) images. */
-const persistableImageUrl = (url: string) => {
-  const u = url.trim();
-  if (!u) return '';
-  if (u.startsWith('data:')) return '';
-  if (u.length > 8000) return '';
-  return u;
-};
 
 export default function RecipeDetailsScreen() {
   const router = useRouter();
@@ -119,7 +129,9 @@ export default function RecipeDetailsScreen() {
   const [nutrition, setNutrition] = useState<NutritionEstimate>(EMPTY_NUTRITION);
   const [installId, setInstallId] = useState<string | null>(null);
   const [billing, setBilling] = useState<RecipeBillingSnapshot | null>(null);
+  const [buyCreditsLoading, setBuyCreditsLoading] = useState(false);
   const [awaitingPlanChoice, setAwaitingPlanChoice] = useState(false);
+  const [savingGallery, setSavingGallery] = useState(false);
   const installIdRef = useRef<string | null>(null);
 
   const sectionLabels = getRecipeSectionLabels(selectedLang);
@@ -155,14 +167,211 @@ export default function RecipeDetailsScreen() {
     router.push('/cook-mode');
   };
 
+  const onShareRecipe = useCallback(async () => {
+    if (!recipe.trim() && !structured.steps.length) return;
+    const title = (dishName.trim() || recipeName.trim() || 'Recipe').trim();
+    const metaLine = [
+      ingredient.trim() ? `Ingredients: ${ingredient.trim()}` : null,
+      `Cuisine: ${selectedCuisine}`,
+      `Language: ${selectedLang}`,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    const body =
+      structured.steps.length || structured.ingredients.length
+        ? joinStructuredRecipe(structured, selectedLang)
+        : recipe.trim();
+    const maxBody = 12000;
+    const clipped = body.length > maxBody ? `${body.slice(0, maxBody)}\n…` : body;
+    const message = `${title}\n${metaLine}\n\n${clipped}\n\n— ChefAI`;
+    const payload: { title: string; message: string; url?: string } = { title, message };
+    const webImage = persistableHttpImageUrl(imageUrl);
+    if (Platform.OS === 'ios' && webImage) {
+      payload.url = webImage;
+    }
+
+    const shareTextOnly = async () => {
+      try {
+        await Share.share(payload);
+      } catch {
+        /* user dismissed share sheet */
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      await shareTextOnly();
+      return;
+    }
+
+    let localImage: string | null = null;
+    const rawImg = imageUrl.trim();
+    if (rawImg) {
+      try {
+        localImage = await ensureShareableRecipeImage(rawImg);
+      } catch {
+        localImage = null;
+      }
+    }
+
+    if (localImage) {
+      const imgForShare = toShareableFileUrl(localImage);
+      const ext = localImage.replace(/^file:\/\//, '').split('.').pop()?.toLowerCase() ?? '';
+      const mimeType =
+        ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      const UTI =
+        mimeType === 'image/png'
+          ? 'public.png'
+          : mimeType === 'image/webp'
+            ? 'public.webp'
+            : 'public.jpeg';
+
+      try {
+        const Clipboard = await import('expo-clipboard');
+        await Clipboard.setStringAsync(message);
+      } catch {
+        // Clipboard is a fallback if a target app drops text.
+      }
+
+      const RNShare = (await import('react-native-share')).default;
+
+      const shareImageWithTextSingleIntent = () =>
+        RNShare.open({
+          title,
+          message,
+          url: imgForShare,
+          type: mimeType,
+          failOnCancel: false,
+        });
+
+      const fallbackExpoImage = async () => {
+        let Sharing: typeof import('expo-sharing');
+        try {
+          Sharing = await import('expo-sharing');
+        } catch {
+          await shareTextOnly();
+          return;
+        }
+        if (!(await Sharing.isAvailableAsync())) {
+          await shareTextOnly();
+          return;
+        }
+        try {
+          const Clipboard = await import('expo-clipboard');
+          await Clipboard.setStringAsync(message);
+        } catch {
+          /* optional */
+        }
+        try {
+          await Sharing.shareAsync(localImage, {
+            mimeType,
+            ...(Platform.OS === 'ios' ? { UTI } : {}),
+            dialogTitle: 'Share photo — recipe is on your clipboard; paste in Messenger if the app only took the image',
+          });
+          if (Platform.OS === 'android') {
+            ToastAndroid.show(
+              'Full recipe is on your clipboard — paste in the chat if only the photo was sent.',
+              ToastAndroid.LONG
+            );
+          }
+        } catch {
+          /* dismissed share sheet */
+        }
+      };
+
+      // One chooser, one destination: text + image in one intent (Facebook/Messenger often keep both).
+      // WhatsApp may still drop the text; full recipe stays on the clipboard — paste in the chat if needed.
+      try {
+        await shareImageWithTextSingleIntent();
+      } catch {
+        await fallbackExpoImage();
+      }
+      return;
+    }
+
+    await shareTextOnly();
+  }, [
+    dishName,
+    recipeName,
+    recipe,
+    structured,
+    selectedLang,
+    ingredient,
+    selectedCuisine,
+    imageUrl,
+  ]);
+
+  const onSaveDishPhotoToGallery = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Photos', 'Use the mobile app to save the dish photo to your gallery.');
+      return;
+    }
+    const raw = imageUrl.trim();
+    if (!raw) return;
+    setSavingGallery(true);
+    try {
+      let requestPermissionsAsync: typeof import('expo-media-library').requestPermissionsAsync;
+      let saveToLibraryAsync: typeof import('expo-media-library').saveToLibraryAsync;
+      try {
+        const mod = await import('expo-media-library');
+        requestPermissionsAsync = mod.requestPermissionsAsync;
+        saveToLibraryAsync = mod.saveToLibraryAsync;
+      } catch {
+        Alert.alert(
+          'Update app build',
+          'Saving to the gallery needs a dev client built with expo-media-library. Stop Metro, run: npx expo run:android (or run:ios), then open the new build.'
+        );
+        return;
+      }
+      const perm = await requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission needed', 'Allow photo library access to save this image.');
+        return;
+      }
+      const local = await ensureLocalImageFileForGallery(raw);
+      if (!local) {
+        Alert.alert(
+          'Could not save',
+          'Only generated or on-device photos can be saved to the gallery from here.'
+        );
+        return;
+      }
+      await saveToLibraryAsync(local);
+      Alert.alert('Saved', 'Photo saved to your gallery. You can attach it when you share.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Try again.';
+      Alert.alert('Could not save', msg);
+    } finally {
+      setSavingGallery(false);
+    }
+  }, [imageUrl]);
+
+  const trimmedImageUrl = imageUrl.trim();
+  const canSaveDishPhotoToGallery =
+    Platform.OS !== 'web' &&
+    Boolean(trimmedImageUrl) &&
+    (trimmedImageUrl.startsWith('data:') ||
+      trimmedImageUrl.startsWith('file://') ||
+      trimmedImageUrl.startsWith('content://') ||
+      trimmedImageUrl.startsWith('ph://'));
+
   const saveRecipe = async () => {
     if (!recipe.trim() && !structured.steps.length) return;
     setSaving(true);
     const alerts = getSaveRecipeAlerts(selectedLang);
     try {
-      const imageToStore = persistableImageUrl(imageUrl);
+      const recipeId = makeShortRecipeId();
+      const rawImage = imageUrl.trim();
+      const imageToStore = await resolveRecipeCoverForSave(rawImage, recipeId);
+      const expectsCopiedLocal =
+        rawImage.length > 0 &&
+        !rawImage.startsWith('data:') &&
+        !persistableHttpImageUrl(rawImage);
+      if (expectsCopiedLocal && !imageToStore) {
+        Alert.alert(alerts.failedTitle, alerts.coverCopyFailedBody);
+        return;
+      }
       const nextItem: StoredSavedRecipe = {
-        id: makeShortRecipeId(),
+        id: recipeId,
         dishName,
         recipe,
         imageUrl: imageToStore,
@@ -186,7 +395,7 @@ export default function RecipeDetailsScreen() {
         savedAt: new Date().toISOString(),
       };
       await upsertSavedRecipe(nextItem);
-      const usedDataImage = imageUrl.trim().startsWith('data:') && !imageToStore;
+      const usedDataImage = rawImage.startsWith('data:') && !imageToStore;
       Alert.alert(
         alerts.savedTitle,
         usedDataImage ? alerts.savedBodyNoImage : alerts.savedBody
@@ -477,13 +686,59 @@ export default function RecipeDetailsScreen() {
     void runRecipeGeneration(true);
   }, [runRecipeGeneration]);
 
+  const runCreditPackPurchase = useCallback(
+    async (productSku: string) => {
+      if (!installId || !API_BASE_URL || !billing || billing.billingDisabled) return;
+      setBuyCreditsLoading(true);
+      try {
+        const { purchaseCreditsWithGooglePlay } = await import('@/lib/buy-credits-play');
+        const next = await purchaseCreditsWithGooglePlay({
+          apiBaseUrl: API_BASE_URL,
+          installId,
+          productSku,
+        });
+        setBilling(next);
+        Alert.alert('Buy credits', `Your balance is now ${next.credits} credits.`, [{ text: 'OK' }]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Purchase did not complete.';
+        Alert.alert('Buy credits', message, [{ text: 'OK' }]);
+      } finally {
+        setBuyCreditsLoading(false);
+      }
+    },
+    [billing, installId]
+  );
+
   const onBuyCreditsPress = useCallback(() => {
+    if (!installId || !API_BASE_URL || !billing || billing.billingDisabled) return;
+
+    if (Platform.OS !== 'android') {
+      Alert.alert(
+        'Buy credits',
+        'Google Play purchases run on Android. Install the Android app from Play (or your dev client) to buy credits.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    const packs = getPlayCreditPacks();
+    if (packs.length === 0) {
+      Alert.alert('Buy credits', 'No credit packs are configured.', [{ text: 'OK' }]);
+      return;
+    }
+
     Alert.alert(
-      'Buy credits',
-      'Google Play in-app purchases will be available in a future update. Each credit is worth about USD~0.05.',
-      [{ text: 'OK' }]
+      'Choose a credit pack',
+      'Prices are set in Google Play (USD). New installs start with 15 free credits.',
+      [
+        ...packs.map((pack) => ({
+          text: `${pack.title} — ${pack.credits} credits (~$${pack.suggestedUsd.toFixed(2)})`,
+          onPress: () => void runCreditPackPurchase(pack.productId),
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ]
     );
-  }, []);
+  }, [billing, installId, runCreditPackPurchase]);
 
   const onYourCreditsPress = useCallback(() => {
     if (!billing) return;
@@ -494,8 +749,12 @@ export default function RecipeDetailsScreen() {
     );
   }, [billing]);
 
+  const usdPerCredit = estimatedUsdPerCredit();
+  const textUsdHint = usdPerCredit.toFixed(2);
+  const photoUsdHint = (usdPerCredit * 3).toFixed(2);
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.page}>
       <ScrollView
         style={{ flex: 1 }}
@@ -522,21 +781,21 @@ export default function RecipeDetailsScreen() {
           <View style={styles.planChoiceCard}>
             <Text style={styles.planChoiceTitle}>Choose how to generate</Text>
             <Text style={styles.planChoiceHint}>
-              Text recipe uses 1 credit (USD~0.05). Photo recipe uses 3 credits (USD~0.15). When credits reach 0, tap
-              Buy credits to top up.
+              Text recipe uses 1 credit (~USD {textUsdHint}). Photo recipe uses 3 credits (~USD {photoUsdHint}). When
+              credits reach 0, tap Buy credits — Small / Medium / Large packs on Google Play.
             </Text>
             <TouchableOpacity
               style={styles.planOption}
               onPress={onChooseTextPlan}
               accessibilityRole="button"
-              accessibilityHint={`Costs ${billing.creditCostTextRecipe ?? 1} credit, about USD~0.05`}>
+              accessibilityHint={`Costs ${billing.creditCostTextRecipe ?? 1} credit, about USD ${textUsdHint}`}>
               <Text style={styles.planOptionTitle}>Go with only text recipe</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.planOption}
               onPress={onChoosePhotoPlan}
               accessibilityRole="button"
-              accessibilityHint={`Costs ${billing.creditCostPhotoRecipe ?? 3} credits, about USD~0.15`}>
+              accessibilityHint={`Costs ${billing.creditCostPhotoRecipe ?? 3} credits, about USD ${photoUsdHint}`}>
               <Text style={styles.planOptionTitle}>Go with photo recipe</Text>
             </TouchableOpacity>
             <View style={styles.planFooterButtons}>
@@ -548,12 +807,19 @@ export default function RecipeDetailsScreen() {
                 <Text style={styles.planFooterButtonLabel}>Your credits</Text>
                 <Text style={styles.planFooterButtonValue}>{billing.credits}</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.planFooterButton, styles.planFooterButtonCompact]}
-                onPress={onBuyCreditsPress}
-                accessibilityRole="button">
-                <Text style={styles.planFooterButtonLabel}>Buy credits</Text>
-              </TouchableOpacity>
+              {!billing.billingDisabled ? (
+                <TouchableOpacity
+                  style={[styles.planFooterButton, styles.planFooterButtonCompact]}
+                  onPress={() => void onBuyCreditsPress()}
+                  accessibilityRole="button"
+                  disabled={buyCreditsLoading}>
+                  {buyCreditsLoading ? (
+                    <ActivityIndicator color="#d3b275" size="small" />
+                  ) : (
+                    <Text style={styles.planFooterButtonLabel}>Buy credits</Text>
+                  )}
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         ) : null}
@@ -561,25 +827,51 @@ export default function RecipeDetailsScreen() {
           <Text style={[styles.errorText, { alignSelf: 'stretch', marginBottom: 12 }]}>{errorMessage}</Text>
         ) : null}
         {!awaitingPlanChoice ? (
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.saveButton}
-            onPress={saveRecipe}
-            disabled={saving || loading || !recipe}>
-            <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.cookModeButton,
-              (loading || !recipe) && styles.cookModeButtonDisabled,
-            ]}
-            onPress={openCookMode}
-            disabled={loading || !recipe}
-            accessibilityRole="button"
-            accessibilityLabel="Cook mode">
-            <Text style={styles.cookModeButtonText}>Cook mode</Text>
-          </TouchableOpacity>
-        </View>
+          <>
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={saveRecipe}
+                disabled={saving || loading || !recipe}>
+                <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.cookModeButton,
+                  (loading || !recipe) && styles.cookModeButtonDisabled,
+                ]}
+                onPress={openCookMode}
+                disabled={loading || !recipe}
+                accessibilityRole="button"
+                accessibilityLabel="Cook mode">
+                <Text style={styles.cookModeButtonText}>Cook mode</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.shareRecipeButton,
+                (loading || (!recipe.trim() && !structured.steps.length)) && styles.shareRecipeButtonDisabled,
+              ]}
+              onPress={() => void onShareRecipe()}
+              disabled={loading || (!recipe.trim() && !structured.steps.length)}
+              accessibilityRole="button"
+              accessibilityLabel="Share recipe to social apps">
+              <Text style={styles.shareRecipeButtonText}>Share recipe</Text>
+              <Text style={styles.shareRecipeHint}>WhatsApp, Facebook, Messages…</Text>
+            </TouchableOpacity>
+            {canSaveDishPhotoToGallery ? (
+              <TouchableOpacity
+                style={[styles.galleryButton, (loading || savingGallery) && styles.galleryButtonDisabled]}
+                onPress={() => void onSaveDishPhotoToGallery()}
+                disabled={loading || savingGallery}
+                accessibilityRole="button"
+                accessibilityLabel="Save dish photo to device gallery">
+                <Text style={styles.galleryButtonText}>
+                  {savingGallery ? 'Saving…' : 'Save photo to gallery'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
         ) : null}
 
         {loading ? (
@@ -797,6 +1089,34 @@ const styles = StyleSheet.create({
   },
   cookModeButtonDisabled: { opacity: 0.45 },
   cookModeButtonText: { color: '#000', fontSize: 13, fontWeight: '700' },
+  shareRecipeButton: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#d3b275',
+    backgroundColor: '#141008',
+  },
+  shareRecipeButtonDisabled: { opacity: 0.45 },
+  shareRecipeButtonText: { color: '#d3b275', fontSize: 14, fontWeight: '700' },
+  shareRecipeHint: { color: '#777', fontSize: 11, marginTop: 4, textAlign: 'center' },
+  galleryButton: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#555',
+    backgroundColor: '#111',
+  },
+  galleryButtonDisabled: { opacity: 0.45 },
+  galleryButtonText: { color: '#c9c9c9', fontSize: 13, fontWeight: '600' },
   loaderWrap: { alignItems: 'center', marginTop: 80 },
   loaderText: { color: '#d3b275', marginTop: 10, fontSize: 14 },
   dishImage: {

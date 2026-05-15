@@ -17,15 +17,8 @@ import {
 } from '@/constants/shopping-list-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
 
@@ -314,7 +307,7 @@ export default function ShoppingListScreen() {
   const remaining = items.filter((x) => !x.checked).length;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.page}>
       <TouchableOpacity style={styles.back} onPress={() => router.back()}>
         <Text style={styles.backText}>{ui.back}</Text>

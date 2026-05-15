@@ -10,7 +10,8 @@ import {
 } from '@/constants/recipe-preferences';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 export default function RecipeListScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -71,7 +72,7 @@ export default function RecipeListScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.page}>
       <ScrollView
         style={{ flex: 1 }}

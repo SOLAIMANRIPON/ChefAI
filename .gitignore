@@ -46,6 +46,7 @@ app-example
 
 # Local billing ledger (dev / single-node server)
 server/data/billing.json
+server/data/iap-consumed.json
 
 # generated native folders
 /ios

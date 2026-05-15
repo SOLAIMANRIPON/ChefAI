@@ -15,7 +15,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import React from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 const RECENT_VIEWS_STORAGE_KEY = 'chefai_recent_views_v1';
@@ -131,18 +132,10 @@ export default function ExploreScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container}>
       <Text style={styles.title}>{t('explore.title')}</Text>
       <Text style={styles.subtitle}>{t('explore.subtitle')}</Text>
-
-      <TouchableOpacity
-        style={styles.settingsEntry}
-        onPress={() => router.push('/settings')}
-        activeOpacity={0.85}>
-        <Text style={styles.settingsEntryTitle}>{t('explore.openSettings')}</Text>
-        <Text style={styles.settingsEntryDesc}>{t('explore.openSettingsDesc')}</Text>
-      </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.shoppingEntry}
@@ -245,16 +238,6 @@ const styles = StyleSheet.create({
   container: { padding: 20, backgroundColor: '#000', paddingBottom: 80 },
   title: { color: '#d3b275', fontSize: 30, fontWeight: 'bold', marginTop: 50 },
   subtitle: { color: '#9a9a9a', fontSize: 13, marginTop: 6, marginBottom: 16 },
-  settingsEntry: {
-    backgroundColor: '#101820',
-    borderWidth: 1,
-    borderColor: '#2a3540',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 14,
-  },
-  settingsEntryTitle: { color: '#c9af80', fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  settingsEntryDesc: { color: '#a8a8a8', fontSize: 13, lineHeight: 20 },
   shoppingEntry: {
     backgroundColor: '#141208',
     borderWidth: 1,

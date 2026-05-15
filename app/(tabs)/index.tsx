@@ -5,7 +5,6 @@ import {
   FlatList,
   Image,
   Modal,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -13,36 +12,19 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
+import {
+  RECIPE_CORE_LANGUAGES,
+  RECIPE_COUNTRY_PICKER_OPTIONS,
+} from '@/constants/recipe-language-options';
 
 const { width } = Dimensions.get('window');
 
-const popularFoodCountries = [
-  'Bangladesh',
-  'India',
-  'Pakistan',
-  'China',
-  'Japan',
-  'Thailand',
-  'Korea',
-  'Turkey',
-  'Iran',
-  'Saudi Arabia',
-  'United Arab Emirates',
-  'Italy',
-  'France',
-  'Spain',
-  'Greece',
-  'Mexico',
-  'United States',
-  'Brazil',
-  'Argentina',
-  'United Kingdom',
-];
-
-const coreLanguages = ['বাংলা', 'English', 'Hindi', 'Arabic', 'French', 'Spanish', 'Urdu'];
+const popularFoodCountries = [...RECIPE_COUNTRY_PICKER_OPTIONS];
+const coreLanguages = [...RECIPE_CORE_LANGUAGES];
 const cuisines = ['Bangladeshi', 'Indian', 'Italian', 'Chinese', 'Mexican', 'Thai', 'Turkish', 'Japanese', ...popularFoodCountries];
 
 export default function HomeScreen() {
@@ -126,7 +108,7 @@ export default function HomeScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" />
       <View style={styles.screenBody}>
         <View style={styles.topZone}>

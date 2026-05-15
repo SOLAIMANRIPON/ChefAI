@@ -3,15 +3,8 @@ import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/h
 import { loadSavedRecipes, type StoredSavedRecipe } from '@/constants/saved-recipes-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React from 'react';
-import {
-  ActivityIndicator,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ShoppingListsHubScreen() {
   const router = useRouter();
@@ -39,7 +32,7 @@ export default function ShoppingListsHubScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.page}>
       <ScrollView
         style={{ flex: 1 }}

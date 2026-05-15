@@ -6,7 +6,17 @@
   },
   "settings": {
     "title": "सेटिंग्स",
-    "subtitle": "नीचे प्रोफ़ाइल सेट करें।"
+    "subtitle": "नीचे प्रोफ़ाइल सेट करें।",
+    "helpTitle": "सहायता",
+    "helpSubtitle": "ChefAI उपयोग, FAQ और टिप्स — केवल यह ऐप।"
+  },
+  "help": {
+    "pickTitle": "ChefAI सहायता — भाषा चुनें",
+    "pickSub": "नीचे की गाइड और खोज आपकी चुनी भाषा में होगी। केवल यह ऐप — वेब नहीं, सामान्य AI उत्तर नहीं।",
+    "tapBelow": "जारी रखने के लिए भाषा पर टैप करें।",
+    "pickFooter": "केवल ChefAI — चिकित्सा, कानूनी या वित्तीय सलाह नहीं।",
+    "languagesHeading": "भाषाएँ",
+    "countriesHeading": "देश"
   },
   "explore": {
     "title": "एक्सप्लोर",

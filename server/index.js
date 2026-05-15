@@ -9,7 +9,9 @@ const {
   canAffordRecipe,
   ensureWallet,
   applySuccessfulRecipeCharge,
+  grantCreditsForGooglePlayPurchase,
 } = require('./billing-store');
+const { verifyAndroidProductPurchase } = require('./google-play-verify');
 
 dotenv.config();
 
@@ -19,6 +21,46 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3-flash-preview').trim();
 const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
 const BILLING_ENABLED = process.env.CHEFAI_BILLING_DISABLED !== '1';
+const ANDROID_PACKAGE_DEFAULT = 'com.solaiman.chefai';
+const PLAY_VERIFY_DISABLED = process.env.CHEFAI_PLAY_VERIFY_DISABLED === '1';
+
+function parsePlayProductCreditsMap() {
+  const raw = process.env.CHEFAI_PLAY_PRODUCT_CREDITS_JSON;
+  if (raw && String(raw).trim()) {
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(obj)) {
+          const id = typeof k === 'string' ? k.trim() : '';
+          const n = typeof v === 'number' ? v : Number(v);
+          if (id && Number.isFinite(n) && n > 0) {
+            out[id] = Math.min(Math.floor(n), 1_000_000);
+          }
+        }
+        if (Object.keys(out).length) return out;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  const singleId = String(process.env.CHEFAI_PLAY_CREDITS_PRODUCT_ID || '').trim();
+  const amount = Number(process.env.CHEFAI_PLAY_CREDITS_AMOUNT ?? 0);
+  if (singleId && Number.isFinite(amount) && amount > 0) {
+    return { [singleId]: Math.min(Math.floor(amount), 1_000_000) };
+  }
+  return {
+    chefai_credits_small: 30,
+    chefai_credits_pack: 80,
+    chefai_credits_large: 200,
+  };
+}
+
+function playVerificationConfigured() {
+  return Boolean(
+    process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_INLINE
+  );
+}
 
 /** Validates ChefAI mobile install ids (`constants/chefai-billing.ts`). */
 function parseChefAiInstallId(req) {
@@ -525,6 +567,10 @@ const buildDishSpecificImagePrompt = ({ dishName, cuisine, queryText, basePrompt
   return `${base}, authentic ${cuisine} dish, faithful to named main ingredients, accurate colors and realistic textures`;
 };
 
+app.get('/', (_req, res) => {
+  res.type('text/plain').send('ChefAI backend is running. Check GET /api/v1/health for status.');
+});
+
 app.get('/api/v1/health', (_req, res) => {
   res.json({
     ok: true,
@@ -533,6 +579,8 @@ app.get('/api/v1/health', (_req, res) => {
     textModel: GEMINI_TEXT_MODEL,
     imageModel: GEMINI_IMAGE_MODEL,
     billingEnabled: BILLING_ENABLED,
+    playPurchaseVerificationConfigured: playVerificationConfigured(),
+    playPurchaseVerificationDisabled: PLAY_VERIFY_DISABLED,
     timestamp: new Date().toISOString(),
     cache: {
       recipeList: recipeListCache.stats(),
@@ -559,6 +607,77 @@ app.get('/api/v1/billing/state', (req, res) => {
   }
   const wallet = ensureWallet(installId);
   res.json({ ...billingSnapshot(wallet), billingDisabled: false });
+});
+
+/**
+ * Confirms a Google Play consumable purchase and credits the install wallet.
+ * Body: { productId, purchaseToken, packageName? }
+ */
+app.post('/api/v1/billing/google-play/grant-credits', async (req, res) => {
+  if (!BILLING_ENABLED) {
+    return res.status(400).json({ message: 'Billing is disabled on this server.' });
+  }
+  const installId = parseChefAiInstallId(req);
+  if (!installId) {
+    return res.status(400).json({
+      message: 'Missing or invalid X-ChefAI-Install-Id header (expected 32 hex characters).',
+    });
+  }
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const productId = typeof body.productId === 'string' ? body.productId.trim() : '';
+  const purchaseToken = typeof body.purchaseToken === 'string' ? body.purchaseToken.trim() : '';
+  const packageName =
+    typeof body.packageName === 'string' && body.packageName.trim()
+      ? body.packageName.trim()
+      : String(process.env.CHEFAI_ANDROID_PACKAGE_NAME || ANDROID_PACKAGE_DEFAULT).trim();
+
+  if (!productId || !purchaseToken) {
+    return res.status(400).json({ message: 'productId and purchaseToken are required.' });
+  }
+
+  const productMap = parsePlayProductCreditsMap();
+  const creditsForProduct = productMap[productId];
+  if (!creditsForProduct) {
+    return res.status(400).json({
+      message: `Unknown productId "${productId}". Configure CHEFAI_PLAY_PRODUCT_CREDITS_JSON or CHEFAI_PLAY_CREDITS_PRODUCT_ID.`,
+    });
+  }
+
+  if (!PLAY_VERIFY_DISABLED) {
+    if (!playVerificationConfigured()) {
+      return res.status(503).json({
+        message:
+          'Play purchase verification is not configured (set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON or GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_INLINE). For local experiments only, CHEFAI_PLAY_VERIFY_DISABLED=1 (never on a public server).',
+      });
+    }
+    const ver = await verifyAndroidProductPurchase({
+      packageName,
+      productId,
+      purchaseToken,
+    });
+    if (!ver.ok) {
+      const detail =
+        ver.reason === 'missing_credentials'
+          ? 'Server credentials missing.'
+          : ver.reason === 'invalid_purchase_state'
+            ? `Invalid purchase state (${ver.purchaseState}).`
+            : ver.reason === 'api_error'
+              ? ver.message || 'Google Play API error.'
+              : 'Verification failed.';
+      return res.status(403).json({ message: detail });
+    }
+  } else {
+    console.warn('[billing] CHEFAI_PLAY_VERIFY_DISABLED=1 — granting credits without Play API verification');
+  }
+
+  const grant = grantCreditsForGooglePlayPurchase(installId, purchaseToken, creditsForProduct, {
+    productId,
+  });
+  if (!grant.ok) {
+    return res.status(grant.status).json({ message: grant.message });
+  }
+  res.json({ billing: grant.billing, duplicate: grant.duplicate === true });
 });
 
 /** Community feed — same shape as app `CommunityPost`; extend or replace with DB later */

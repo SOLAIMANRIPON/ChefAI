@@ -6,7 +6,17 @@
   },
   "settings": {
     "title": "Settings",
-    "subtitle": "Manage your profile below."
+    "subtitle": "Manage your profile below.",
+    "helpTitle": "Help",
+    "helpSubtitle": "How to use ChefAI, FAQ, and tips — ChefAI only."
+  },
+  "help": {
+    "pickTitle": "ChefAI Help — choose language",
+    "pickSub": "Guides and search below use the language you pick. Only this app is covered — no web browsing, no general AI answers.",
+    "tapBelow": "Tap a language to continue.",
+    "pickFooter": "ChefAI only — not medical, legal, or financial advice.",
+    "languagesHeading": "Languages",
+    "countriesHeading": "Countries"
   },
   "explore": {
     "title": "Explore",

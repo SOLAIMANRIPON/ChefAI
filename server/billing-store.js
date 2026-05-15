@@ -5,6 +5,7 @@ const path = require('path');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_PATH = path.join(DATA_DIR, 'billing.json');
+const IAP_LEDGER_PATH = path.join(DATA_DIR, 'iap-consumed.json');
 
 const CREDIT_COST_TEXT_RECIPE = 1;
 const CREDIT_COST_PHOTO_RECIPE = 3;
@@ -86,10 +87,69 @@ function applySuccessfulRecipeCharge(installId, includeImage) {
   return billingSnapshot(next);
 }
 
+function readIapLedger() {
+  try {
+    const raw = fs.readFileSync(IAP_LEDGER_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    const tokens = parsed?.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : {};
+    return { tokens };
+  } catch {
+    return { tokens: {} };
+  }
+}
+
+function writeIapLedger(ledger) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(IAP_LEDGER_PATH, JSON.stringify({ tokens: ledger.tokens }, null, 2), 'utf8');
+}
+
+/**
+ * Credits wallet after a verified Play consumable purchase.
+ * Idempotent per purchaseToken (replay returns current billing for same installId).
+ */
+function grantCreditsForGooglePlayPurchase(installId, purchaseToken, creditsToAdd, meta) {
+  const token = String(purchaseToken || '').trim();
+  if (!token || token.length < 8) {
+    return { ok: false, status: 400, message: 'Invalid purchaseToken.' };
+  }
+  const credits = clampCredits(creditsToAdd);
+  if (credits <= 0) {
+    return { ok: false, status: 400, message: 'Invalid credit amount for product.' };
+  }
+
+  ensureWallet(installId);
+  const ledger = readIapLedger();
+  const prevEntry = ledger.tokens[token];
+  if (prevEntry) {
+    if (prevEntry.installId !== installId) {
+      return { ok: false, status: 403, message: 'Purchase token was already redeemed on another install.' };
+    }
+    const wallet = normalizeWallet(readAll()[installId]);
+    return { ok: true, billing: billingSnapshot(wallet), duplicate: true };
+  }
+
+  const all = readAll();
+  const prev = normalizeWallet(all[installId]);
+  const next = { credits: clampCredits(prev.credits + credits) };
+  all[installId] = next;
+  writeAll(all);
+
+  ledger.tokens[token] = {
+    installId,
+    credits,
+    productId: meta?.productId || '',
+    grantedAt: new Date().toISOString(),
+  };
+  writeIapLedger(ledger);
+
+  return { ok: true, billing: billingSnapshot(next), duplicate: false };
+}
+
 module.exports = {
   billingSnapshot,
   peekRecipeCharge,
   canAffordRecipe,
   ensureWallet,
   applySuccessfulRecipeCharge,
+  grantCreditsForGooglePlayPurchase,
 };

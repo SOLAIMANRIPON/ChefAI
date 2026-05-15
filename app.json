@@ -2,6 +2,7 @@
   "expo": {
     "name": "ChefAI",
     "slug": "chef-ai",
+    "scheme": "chefai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -28,6 +29,14 @@
           "photosPermission": "ChefAI needs photo access so you can share your cooking in Community."
         }
       ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "ChefAI can save dish photos you choose to export to your gallery.",
+          "savePhotosPermission": "ChefAI saves dish photos to your gallery when you tap Save photo to gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
       "expo-localization",
       [
         "expo-notifications",
@@ -36,7 +45,8 @@
           "enableBackgroundRemoteNotifications": false
         }
       ],
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      "react-native-iap"
     ],
     "extra": {
       "eas": {

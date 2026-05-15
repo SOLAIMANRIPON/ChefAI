@@ -10,7 +10,7 @@ type Props = {
 export function DesignerCreditLine({ style }: Props) {
   return (
     <Text style={[styles.text, style]} accessibilityRole="text">
-      DESIGNED BY SOLAIMAN • 2026
+      DESIGN BY NISHARGA LABS • 2026
     </Text>
   );
 }
