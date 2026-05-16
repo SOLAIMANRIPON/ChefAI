@@ -574,11 +574,15 @@ app.get('/', (_req, res) => {
 
 /** Public privacy policy for Google Play (also mirrored on GitHub Pages). */
 const privacyHtmlPath = path.join(__dirname, '..', 'docs', 'privacy.html');
+const dataDeletionHtmlPath = path.join(__dirname, '..', 'docs', 'data-deletion.html');
 app.get('/privacy', (_req, res) => {
   res.sendFile(privacyHtmlPath);
 });
 app.get('/privacy.html', (_req, res) => {
   res.sendFile(privacyHtmlPath);
+});
+app.get('/data-deletion', (_req, res) => {
+  res.sendFile(dataDeletionHtmlPath);
 });
 
 app.get('/api/v1/health', (_req, res) => {
