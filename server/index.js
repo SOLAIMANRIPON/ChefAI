@@ -12,7 +12,7 @@ const {
   applySuccessfulRecipeCharge,
   grantCreditsForGooglePlayPurchase,
 } = require('./billing-store');
-const { verifyAndroidProductPurchase } = require('./google-play-verify');
+const { verifyAndroidProductPurchase, consumeAndroidProductPurchase } = require('./google-play-verify');
 
 dotenv.config();
 
@@ -691,7 +691,54 @@ app.post('/api/v1/billing/google-play/grant-credits', async (req, res) => {
   if (!grant.ok) {
     return res.status(grant.status).json({ message: grant.message });
   }
+
+  if (!PLAY_VERIFY_DISABLED && playVerificationConfigured()) {
+    const consumed = await consumeAndroidProductPurchase({ packageName, productId, purchaseToken });
+    if (!consumed.ok) {
+      console.warn(
+        '[billing] Play consume after grant failed:',
+        consumed.reason,
+        consumed.message || ''
+      );
+    }
+  }
+
   res.json({ billing: grant.billing, duplicate: grant.duplicate === true });
+});
+
+/**
+ * Clears a stuck consumable on Play (no wallet change). Requires CHEFAI_PLAY_ADMIN_SECRET header.
+ * Body: { productId, purchaseToken, packageName? }
+ */
+app.post('/api/v1/billing/google-play/consume-purchase', async (req, res) => {
+  const secret = String(process.env.CHEFAI_PLAY_ADMIN_SECRET || '').trim();
+  const authHeader = String(req.headers['x-chefai-admin-secret'] || '').trim();
+  if (!secret || authHeader !== secret) {
+    return res.status(404).json({ message: 'Not found.' });
+  }
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const productId = typeof body.productId === 'string' ? body.productId.trim() : '';
+  const purchaseToken = typeof body.purchaseToken === 'string' ? body.purchaseToken.trim() : '';
+  const packageName =
+    typeof body.packageName === 'string' && body.packageName.trim()
+      ? body.packageName.trim()
+      : String(process.env.CHEFAI_ANDROID_PACKAGE_NAME || ANDROID_PACKAGE_DEFAULT).trim();
+
+  if (!productId || !purchaseToken) {
+    return res.status(400).json({ message: 'productId and purchaseToken are required.' });
+  }
+  if (!playVerificationConfigured()) {
+    return res.status(503).json({ message: 'Play API credentials not configured.' });
+  }
+
+  const consumed = await consumeAndroidProductPurchase({ packageName, productId, purchaseToken });
+  if (!consumed.ok) {
+    return res.status(403).json({
+      message: consumed.message || consumed.reason || 'Consume failed.',
+    });
+  }
+  res.json({ ok: true, productId });
 });
 
 /** Community feed — same shape as app `CommunityPost`; extend or replace with DB later */
