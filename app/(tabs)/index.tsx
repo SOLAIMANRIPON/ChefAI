@@ -19,13 +19,14 @@ import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import {
   RECIPE_CORE_LANGUAGES,
   RECIPE_COUNTRY_PICKER_OPTIONS,
+  RECIPE_CUISINE_PICKER_OPTIONS,
 } from '@/constants/recipe-language-options';
 
 const { width } = Dimensions.get('window');
 
-const popularFoodCountries = [...RECIPE_COUNTRY_PICKER_OPTIONS];
+const countryPickerOptions = [...RECIPE_COUNTRY_PICKER_OPTIONS];
 const coreLanguages = [...RECIPE_CORE_LANGUAGES];
-const cuisines = ['Bangladeshi', 'Indian', 'Italian', 'Chinese', 'Mexican', 'Thai', 'Turkish', 'Japanese', ...popularFoodCountries];
+const cuisines = [...RECIPE_CUISINE_PICKER_OPTIONS];
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -93,7 +94,7 @@ export default function HomeScreen() {
             ))}
 
             <Text style={styles.modalSectionTitle}>Countries</Text>
-            {popularFoodCountries.map((item) => (
+            {countryPickerOptions.map((item) => (
               <TouchableOpacity key={`country-${item}`} style={styles.modalItem} onPress={() => { onSelect(item); onClose(); }}>
                 <Text style={styles.modalItemText}>{item}</Text>
               </TouchableOpacity>

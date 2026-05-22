@@ -3,6 +3,7 @@
  * not assets/images/splash.png. Gradle assembleDebug does not refresh those from Expo.
  *
  * Run after changing assets/images/splash.png (or after `expo prebuild` overwrote them):
+ *   npm run center:splash
  *   npm run sync:splash-android
  */
 const fs = require('fs');

@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "postinstall": "node scripts/patch-android-libcxx-link.js",
+    "center:splash": "node scripts/center-splash-logo.js",
     "sync:splash-android": "node scripts/sync-android-splash-icon.js",
     "start": "expo start",
     "start:backend": "node server/index.js",
