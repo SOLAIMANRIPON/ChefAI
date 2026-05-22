@@ -151,7 +151,12 @@ function stripBengaliNukta(input: string): string {
 }
 
 
-const WAKE_WORD_RE = /chef|chif|sef|শেফ|সেফ|চেফ|শেপ|সেপ|শেষ|সেস|শাফ|সাফ|শ্যাফ|স্যাফ|চিফ|সিফ|শিফ|সিপ|শিপ/gi;
+/** Optional “Chef” prefix only — never strip শেষ (breaks “এই ধাপ শেষ”). */
+const LEADING_WAKE_WORD_RE =
+  /^\s*(?:chef|chif|sef|শেফ|সেফ|চেফ|শেপ|সেপ|শাফ|সাফ|শ্যাফ|স্যাফ|চিফ|সিফ|শিফ|সিপ|শিপ)(?:\s+|$)/i;
+
+/** Commands that may interrupt step TTS while the mic stays on (no stop/restart beeps). */
+const TTS_INTERRUPT_COMMANDS = new Set<VoiceCommand>(['pause_audio', 'mark_done', 'next', 'previous']);
 
 const SPEECH_LOCALE_BY_LANGUAGE: Record<string, string> = {
   বাংলা: 'bn-BD',
@@ -337,9 +342,9 @@ const COMMAND_CANONICALS: Record<string, Record<Exclude<VoiceCommand, null>, str
     next: ['পরের ধাপ বল', 'পরের ধাপ', 'নেক্সট ধাপ'],
     previous: ['আগের ধাপ বল', 'আগের ধাপ'],
     repeat: ['আবার বল', 'আবার পড়ো', 'রিপিট কর'],
-    pause_audio: ['এখন থাম', 'ভয়েস থামাও', 'পড়া থামাও'],
+    pause_audio: ['এখন থাম', 'থাম', 'থামাও', 'ভয়েস থামাও', 'পড়া থামাও', 'পড়া বন্ধ'],
     resume_audio: ['এখন বল', 'আবার বলো', 'চালাও'],
-    mark_done: ['এই ধাপ শেষ', 'ধাপ শেষ', 'এই ধাপ সম্পন্ন'],
+    mark_done: ['এই ধাপ শেষ', 'ধাপ শেষ', 'এই ধাপ সম্পন্ন', 'ধাপ সম্পন্ন', 'শেষ কর', 'সম্পন্ন'],
     pause_timer: ['টাইমার থামাও', 'টাইমার পজ কর'],
     resume_timer: ['টাইমার চালাও', 'টাইমার রিজিউম কর'],
     stop_timer: ['টাইমার বন্ধ কর', 'টাইমার স্টপ কর'],
@@ -647,6 +652,16 @@ function fuzzyMatchThresholdForPhraseLength(phraseLength: number): number {
   return 3;
 }
 
+function stripLeadingWakeWord(text: string): string {
+  let body = text.replace(/\s+/g, ' ').trim();
+  for (let i = 0; i < 3; i += 1) {
+    const next = body.replace(LEADING_WAKE_WORD_RE, '').trim();
+    if (next === body) break;
+    body = next;
+  }
+  return body;
+}
+
 function bestFuzzyCommandMatch(
   text: string,
   catalog: Record<Exclude<VoiceCommand, null>, string[]>,
@@ -660,6 +675,12 @@ function bestFuzzyCommandMatch(
   (Object.keys(catalog) as Exclude<VoiceCommand, null>[]).forEach((command) => {
     catalog[command].forEach((phrase) => {
       const normalizedPhrase = applyAsrFixes(phrase, uiLanguage);
+      if (normalizedPhrase.length >= 5 && text.includes(normalizedPhrase)) {
+        if (0 < best.distance || (best.distance === 0 && normalizedPhrase.length > best.phraseLength)) {
+          best = { command, distance: 0, phraseLength: normalizedPhrase.length };
+        }
+        return;
+      }
       const distance = levenshtein(text, normalizedPhrase);
       if (
         distance < best.distance ||
@@ -675,10 +696,10 @@ function bestFuzzyCommandMatch(
 }
 
 function parseVoiceCommand(raw: string, uiLanguage: string): VoiceCommand {
-  const text = normalizeCommandText(raw);
+  const text =
+    uiLanguage === 'বাংলা' ? normalizeBnCommandText(raw) : normalizeCommandText(raw);
   if (!text) return null;
-  WAKE_WORD_RE.lastIndex = 0;
-  const body = (WAKE_WORD_RE.test(text) ? text.replace(WAKE_WORD_RE, ' ') : text).replace(/\s+/g, ' ').trim();
+  const body = stripLeadingWakeWord(text);
   if (!body) return null;
   const normalized = applyAsrFixes(body, uiLanguage);
   const catalog = getCommandCatalog(uiLanguage);
@@ -715,7 +736,7 @@ export default function CookModeScreen() {
   const scrollContentHeightRef = React.useRef(0);
   const lastVoiceTranscriptRef = React.useRef('');
   const lastVoiceCommandAtRef = React.useRef(0);
-  const voicePausedForTtsRef = React.useRef(false);
+  const isTtsSpeakingRef = React.useRef(false);
   const recognitionRestartTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsGenerationRef = React.useRef(0);
 
@@ -777,7 +798,7 @@ export default function CookModeScreen() {
       if (intervalRef.current) clearInterval(intervalRef.current);
       void cancelCookTimerNotification(scheduledNotificationIdRef.current);
       clearRecognitionRestartTimer();
-      voicePausedForTtsRef.current = false;
+      isTtsSpeakingRef.current = false;
       speechRecognitionModule?.stop();
       Speech.stop();
       scheduledNotificationIdRef.current = null;
@@ -951,16 +972,21 @@ export default function CookModeScreen() {
     20 + HOME_EXPLORE_NAV_RESERVED_BOTTOM + (timerStripVisible ? TIMER_STICKY_MIN_HEIGHT + 8 : 0) + PADDING_BOTTOM_EXTRA;
 
   const recognitionRestartDelayMs = Platform.OS === 'android' ? 800 : 400;
-  const recognitionResumeAfterTtsMs = Platform.OS === 'android' ? 500 : 300;
+
+  const cancelStepTts = React.useCallback(() => {
+    ttsGenerationRef.current += 1;
+    isTtsSpeakingRef.current = false;
+    Speech.stop();
+  }, []);
 
   const scheduleRecognitionRestart = React.useCallback(
     (delayMs: number, statusWhileWaiting?: string) => {
       clearRecognitionRestartTimer();
-      if (!handsFreeEnabled || !speechRecognitionModule || voicePausedForTtsRef.current) return;
+      if (!handsFreeEnabled || !speechRecognitionModule) return;
       if (statusWhileWaiting) setVoiceStatusText(statusWhileWaiting);
       recognitionRestartTimerRef.current = setTimeout(() => {
         recognitionRestartTimerRef.current = null;
-        if (!handsFreeEnabled || !speechRecognitionModule || voicePausedForTtsRef.current) return;
+        if (!handsFreeEnabled || !speechRecognitionModule) return;
         setVoiceStatusText(ui.voiceListening);
         speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
       }, delayMs);
@@ -974,12 +1000,6 @@ export default function CookModeScreen() {
     ]
   );
 
-  const resumeVoiceRecognitionAfterTts = React.useCallback(() => {
-    voicePausedForTtsRef.current = false;
-    if (!handsFreeEnabled || !speechRecognitionModule) return;
-    scheduleRecognitionRestart(recognitionResumeAfterTtsMs);
-  }, [handsFreeEnabled, recognitionResumeAfterTtsMs, scheduleRecognitionRestart, speechRecognitionModule]);
-
   const speakCurrentStep = React.useCallback(
     (prefix?: string) => {
       if (audioPaused || !currentStepText.trim()) return;
@@ -988,9 +1008,7 @@ export default function CookModeScreen() {
       const generation = ttsGenerationRef.current + 1;
       ttsGenerationRef.current = generation;
 
-      voicePausedForTtsRef.current = true;
-      clearRecognitionRestartTimer();
-      speechRecognitionModule?.stop();
+      isTtsSpeakingRef.current = true;
       setVoiceStatusText(ui.voiceReadingStep);
       Speech.stop();
       Speech.speak(spoken, {
@@ -998,35 +1016,31 @@ export default function CookModeScreen() {
         language: speechLocale,
         onDone: () => {
           if (ttsGenerationRef.current !== generation) return;
-          resumeVoiceRecognitionAfterTts();
+          isTtsSpeakingRef.current = false;
+          if (handsFreeEnabled) setVoiceStatusText(ui.voiceListening);
         },
         onStopped: () => {
           if (ttsGenerationRef.current !== generation) return;
-          resumeVoiceRecognitionAfterTts();
+          isTtsSpeakingRef.current = false;
+          if (handsFreeEnabled) setVoiceStatusText(ui.voiceListening);
         },
         onError: () => {
           if (ttsGenerationRef.current !== generation) return;
-          resumeVoiceRecognitionAfterTts();
+          isTtsSpeakingRef.current = false;
+          if (handsFreeEnabled) setVoiceStatusText(ui.voiceListening);
         },
       });
     },
-    [
-      audioPaused,
-      clearRecognitionRestartTimer,
-      currentStepText,
-      resolvedVoiceLanguage,
-      resumeVoiceRecognitionAfterTts,
-      speechLocale,
-      speechRecognitionModule,
-      ui.voiceReadingStep,
-    ]
+    [audioPaused, currentStepText, handsFreeEnabled, resolvedVoiceLanguage, speechLocale, ui.voiceListening, ui.voiceReadingStep]
   );
 
+  /** Speak as soon as steps are ready — do not wait for mic permission / hands-free setup. */
   React.useEffect(() => {
-    if (!handsFreeEnabled) return;
-    const stepNumber = resolvedVoiceLanguage === 'বাংলা' ? toBanglaDigits(String(safeIndex + 1)) : String(safeIndex + 1);
+    if (loading || stepCount === 0 || audioPaused) return;
+    const stepNumber =
+      resolvedVoiceLanguage === 'বাংলা' ? toBanglaDigits(String(safeIndex + 1)) : String(safeIndex + 1);
     speakCurrentStep(`${spokenStepPrefix} ${stepNumber}`);
-  }, [handsFreeEnabled, resolvedVoiceLanguage, safeIndex, speakCurrentStep, spokenStepPrefix]);
+  }, [audioPaused, loading, resolvedVoiceLanguage, safeIndex, speakCurrentStep, spokenStepPrefix, stepCount]);
 
   const toggleAudioMute = React.useCallback(() => {
     setAudioPaused((prev) => {
@@ -1046,14 +1060,14 @@ export default function CookModeScreen() {
     }
     setHandsFreeEnabled((prev) => {
       if (prev) {
-        voicePausedForTtsRef.current = false;
+        isTtsSpeakingRef.current = false;
         clearRecognitionRestartTimer();
         speechRecognitionModule.stop();
         Speech.stop();
         setVoiceStatusText(ui.voiceOff);
         return false;
       }
-      voicePausedForTtsRef.current = false;
+      isTtsSpeakingRef.current = false;
       setVoiceStatusText(ui.voiceListening);
       speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
       return true;
@@ -1071,23 +1085,26 @@ export default function CookModeScreen() {
       if (!command) return;
       switch (command) {
         case 'next':
+          cancelStepTts();
           setCurrentIndex((i) => Math.min(stepCount - 1, i + 1));
           break;
         case 'previous':
+          cancelStepTts();
           setCurrentIndex((i) => Math.max(0, i - 1));
           break;
         case 'repeat':
           speakCurrentStep();
           break;
         case 'pause_audio':
+          cancelStepTts();
           setAudioPaused(true);
-          Speech.stop();
           break;
         case 'resume_audio':
           setAudioPaused(false);
           setTimeout(() => speakCurrentStep(), 80);
           break;
         case 'mark_done':
+          cancelStepTts();
           markCurrentDoneAndAdvance();
           break;
         case 'pause_timer':
@@ -1127,21 +1144,30 @@ export default function CookModeScreen() {
           break;
       }
     },
-    [currentStepText, markCurrentDoneAndAdvance, scrollByVoice, speakCurrentStep, stepCount, stopTimerFully, timerStatus, togglePauseResume]
+    [
+      cancelStepTts,
+      currentStepText,
+      markCurrentDoneAndAdvance,
+      scrollByVoice,
+      speakCurrentStep,
+      stepCount,
+      stopTimerFully,
+      timerStatus,
+      togglePauseResume,
+    ]
   );
 
   React.useEffect(() => {
     if (!speechRecognitionModule?.addListener) return;
 
     const onResult = speechRecognitionModule.addListener('result', (event: SpeechRecognitionResultEvent) => {
-      if (voicePausedForTtsRef.current) return;
-
       const transcript = event.results?.[0]?.transcript?.trim();
+      const isPartial = speechResultIsPartial(event);
 
-      // Only explicit partials skip command handling (see speechResultIsPartial).
-      if (speechResultIsPartial(event)) {
+      if (isPartial) {
         if (transcript) {
-          setVoiceStatusText(`${ui.voiceListeningLive}: "${truncateVoiceLiveHint(transcript)}"`);
+          const prefix = isTtsSpeakingRef.current ? ui.voiceReadingStep : ui.voiceListeningLive;
+          setVoiceStatusText(`${prefix}: "${truncateVoiceLiveHint(transcript)}"`);
         }
         return;
       }
@@ -1153,6 +1179,9 @@ export default function CookModeScreen() {
 
       const command = parseVoiceCommand(transcript, resolvedVoiceLanguage);
       if (!command) return;
+
+      if (isTtsSpeakingRef.current && !TTS_INTERRUPT_COMMANDS.has(command)) return;
+
       setVoiceStatusText(`${ui.heardPrefix}: ${transcript}`);
       lastVoiceTranscriptRef.current = transcript;
       lastVoiceCommandAtRef.current = now;
@@ -1161,17 +1190,17 @@ export default function CookModeScreen() {
     });
 
     const onError = speechRecognitionModule.addListener('error', () => {
-      if (voicePausedForTtsRef.current) return;
+      if (isTtsSpeakingRef.current) return;
       scheduleRecognitionRestart(900, ui.voiceReconnect);
     });
 
     const onStart = speechRecognitionModule.addListener('start', () => {
-      if (voicePausedForTtsRef.current) return;
+      if (isTtsSpeakingRef.current) return;
       setVoiceStatusText(ui.voiceListening);
     });
 
     const onEnd = speechRecognitionModule.addListener('end', () => {
-      if (!handsFreeEnabled || voicePausedForTtsRef.current) return;
+      if (!handsFreeEnabled || isTtsSpeakingRef.current) return;
       scheduleRecognitionRestart(recognitionRestartDelayMs, ui.voiceRestart);
     });
 
@@ -1211,15 +1240,29 @@ export default function CookModeScreen() {
 
   React.useEffect(() => {
     let cancelled = false;
-    const setupHandsFree = async () => {
-      try {
-        const mod = await resolveSpeechRecognitionModule();
+    void resolveSpeechRecognitionModule()
+      .then((mod) => {
         if (cancelled) return;
         setSpeechRecognitionModule(mod);
-        if (!mod) {
-          setVoiceStatusText(ui.voiceUnavailable);
-          return;
+        if (!mod) setVoiceStatusText(ui.voiceUnavailable);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSpeechRecognitionModule(null);
+          setVoiceStatusText(ui.voiceNeedsDevBuild);
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ui.voiceNeedsDevBuild, ui.voiceUnavailable]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const setupHandsFree = async () => {
+      const mod = speechRecognitionModule;
+      if (!mod) return;
+      try {
         const permission = await mod.requestPermissionsAsync();
         if (!permission.granted) {
           setVoiceStatusText(ui.micPermissionOff);
@@ -1227,7 +1270,7 @@ export default function CookModeScreen() {
         }
         if (cancelled) return;
         setHandsFreeEnabled(true);
-        setVoiceStatusText(ui.voiceListening);
+        if (!isTtsSpeakingRef.current) setVoiceStatusText(ui.voiceListening);
         mod.start(cookModeSpeechRecognitionOptions);
       } catch {
         setVoiceStatusText(ui.voiceNeedsDevBuild);
@@ -1236,9 +1279,8 @@ export default function CookModeScreen() {
     void setupHandsFree();
     return () => {
       cancelled = true;
-      Speech.stop();
     };
-  }, [cookModeSpeechRecognitionOptions, ui]);
+  }, [cookModeSpeechRecognitionOptions, speechRecognitionModule, ui]);
 
   if (loading) {
     return (
