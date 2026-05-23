@@ -737,10 +737,14 @@ export default function CookModeScreen() {
   const lastVoiceTranscriptRef = React.useRef('');
   const lastVoiceCommandAtRef = React.useRef(0);
   const isTtsSpeakingRef = React.useRef(false);
+  const pendingMicRestartAfterTtsRef = React.useRef(false);
+  const handsFreeEnabledRef = React.useRef(false);
   const recognitionRestartTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsGenerationRef = React.useRef(0);
+  const initialStepSpeakDoneRef = React.useRef(false);
 
   remainingSecondsRef.current = remainingSeconds;
+  handsFreeEnabledRef.current = handsFreeEnabled;
 
   const clearRecognitionRestartTimer = React.useCallback(() => {
     if (recognitionRestartTimerRef.current) {
@@ -864,9 +868,8 @@ export default function CookModeScreen() {
     (): SpeechRecognitionStartOptions => ({
       lang: speechLocale,
       interimResults: true,
-      // Android 13+ continuous mode streams segments; some devices rarely surface finals reliably.
-      // One-shot sessions fire `onResults` with isFinal; `end` listener already restarts recognition.
-      continuous: Platform.OS !== 'android',
+      // Keep one Android session alive through step TTS (one-shot `end` left mic dead until read finished).
+      continuous: true,
       contextualStrings: speechBiasStrings.length > 0 ? speechBiasStrings : undefined,
       iosVoiceProcessingEnabled: Platform.OS === 'ios',
     }),
@@ -973,20 +976,14 @@ export default function CookModeScreen() {
 
   const recognitionRestartDelayMs = Platform.OS === 'android' ? 800 : 400;
 
-  const cancelStepTts = React.useCallback(() => {
-    ttsGenerationRef.current += 1;
-    isTtsSpeakingRef.current = false;
-    Speech.stop();
-  }, []);
-
   const scheduleRecognitionRestart = React.useCallback(
     (delayMs: number, statusWhileWaiting?: string) => {
       clearRecognitionRestartTimer();
-      if (!handsFreeEnabled || !speechRecognitionModule) return;
+      if (!handsFreeEnabledRef.current || !speechRecognitionModule) return;
       if (statusWhileWaiting) setVoiceStatusText(statusWhileWaiting);
       recognitionRestartTimerRef.current = setTimeout(() => {
         recognitionRestartTimerRef.current = null;
-        if (!handsFreeEnabled || !speechRecognitionModule) return;
+        if (!handsFreeEnabledRef.current || !speechRecognitionModule) return;
         setVoiceStatusText(ui.voiceListening);
         speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
       }, delayMs);
@@ -994,11 +991,25 @@ export default function CookModeScreen() {
     [
       clearRecognitionRestartTimer,
       cookModeSpeechRecognitionOptions,
-      handsFreeEnabled,
       speechRecognitionModule,
       ui.voiceListening,
+      ui.voiceReconnect,
     ]
   );
+
+  const resumeMicAfterTts = React.useCallback(() => {
+    pendingMicRestartAfterTtsRef.current = false;
+    if (!handsFreeEnabledRef.current || !speechRecognitionModule) return;
+    scheduleRecognitionRestart(Platform.OS === 'android' ? 450 : 250);
+  }, [scheduleRecognitionRestart, speechRecognitionModule]);
+
+  const cancelStepTts = React.useCallback(() => {
+    const wasSpeaking = isTtsSpeakingRef.current;
+    ttsGenerationRef.current += 1;
+    isTtsSpeakingRef.current = false;
+    Speech.stop();
+    if (wasSpeaking) resumeMicAfterTts();
+  }, [resumeMicAfterTts]);
 
   const speakCurrentStep = React.useCallback(
     (prefix?: string) => {
@@ -1017,30 +1028,48 @@ export default function CookModeScreen() {
         onDone: () => {
           if (ttsGenerationRef.current !== generation) return;
           isTtsSpeakingRef.current = false;
-          if (handsFreeEnabled) setVoiceStatusText(ui.voiceListening);
+          if (handsFreeEnabledRef.current) {
+            setVoiceStatusText(ui.voiceListening);
+            resumeMicAfterTts();
+          }
         },
         onStopped: () => {
           if (ttsGenerationRef.current !== generation) return;
           isTtsSpeakingRef.current = false;
-          if (handsFreeEnabled) setVoiceStatusText(ui.voiceListening);
+          if (handsFreeEnabledRef.current) {
+            setVoiceStatusText(ui.voiceListening);
+            resumeMicAfterTts();
+          }
         },
         onError: () => {
           if (ttsGenerationRef.current !== generation) return;
           isTtsSpeakingRef.current = false;
-          if (handsFreeEnabled) setVoiceStatusText(ui.voiceListening);
+          if (handsFreeEnabledRef.current) {
+            setVoiceStatusText(ui.voiceListening);
+            resumeMicAfterTts();
+          }
         },
       });
     },
-    [audioPaused, currentStepText, handsFreeEnabled, resolvedVoiceLanguage, speechLocale, ui.voiceListening, ui.voiceReadingStep]
+    [audioPaused, currentStepText, resolvedVoiceLanguage, resumeMicAfterTts, speechLocale, ui.voiceListening, ui.voiceReadingStep]
   );
 
-  /** Speak as soon as steps are ready — do not wait for mic permission / hands-free setup. */
+  /** Speak soon after load; first entry waits briefly so mic can start before TTS. */
   React.useEffect(() => {
     if (loading || stepCount === 0 || audioPaused) return;
     const stepNumber =
       resolvedVoiceLanguage === 'বাংলা' ? toBanglaDigits(String(safeIndex + 1)) : String(safeIndex + 1);
-    speakCurrentStep(`${spokenStepPrefix} ${stepNumber}`);
-  }, [audioPaused, loading, resolvedVoiceLanguage, safeIndex, speakCurrentStep, spokenStepPrefix, stepCount]);
+    const spokenPrefix = `${spokenStepPrefix} ${stepNumber}`;
+
+    if (!initialStepSpeakDoneRef.current) {
+      initialStepSpeakDoneRef.current = true;
+      const delayMs = handsFreeEnabled ? 150 : 650;
+      const timer = setTimeout(() => speakCurrentStep(spokenPrefix), delayMs);
+      return () => clearTimeout(timer);
+    }
+
+    speakCurrentStep(spokenPrefix);
+  }, [audioPaused, loading, resolvedVoiceLanguage, safeIndex, speakCurrentStep, spokenStepPrefix, stepCount, handsFreeEnabled]);
 
   const toggleAudioMute = React.useCallback(() => {
     setAudioPaused((prev) => {
@@ -1200,7 +1229,11 @@ export default function CookModeScreen() {
     });
 
     const onEnd = speechRecognitionModule.addListener('end', () => {
-      if (!handsFreeEnabled || isTtsSpeakingRef.current) return;
+      if (!handsFreeEnabledRef.current) return;
+      if (isTtsSpeakingRef.current) {
+        pendingMicRestartAfterTtsRef.current = true;
+        return;
+      }
       scheduleRecognitionRestart(recognitionRestartDelayMs, ui.voiceRestart);
     });
 
