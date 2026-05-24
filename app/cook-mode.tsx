@@ -703,7 +703,22 @@ function parseVoiceCommand(raw: string, uiLanguage: string): VoiceCommand {
   if (!body) return null;
   const normalized = applyAsrFixes(body, uiLanguage);
   const catalog = getCommandCatalog(uiLanguage);
-  return bestFuzzyCommandMatch(normalized, catalog, uiLanguage);
+  const primary = bestFuzzyCommandMatch(normalized, catalog, uiLanguage);
+  if (primary) return primary;
+  const hasBengaliScript = /[\u0980-\u09FF]/.test(raw);
+  if (uiLanguage !== 'বাংলা' && hasBengaliScript) {
+    const bnBody = stripLeadingWakeWord(normalizeBnCommandText(raw));
+    if (bnBody) {
+      return bestFuzzyCommandMatch(applyAsrFixes(bnBody, 'বাংলা'), COMMAND_CANONICALS['বাংলা'], 'বাংলা');
+    }
+  }
+  if (uiLanguage === 'বাংলা' && /[a-z]/i.test(raw)) {
+    const enBody = stripLeadingWakeWord(normalizeCommandText(raw));
+    if (enBody) {
+      return bestFuzzyCommandMatch(applyAsrFixes(enBody, 'English'), COMMAND_CANONICALS.English, 'English');
+    }
+  }
+  return null;
 }
 
 export default function CookModeScreen() {
@@ -742,6 +757,8 @@ export default function CookModeScreen() {
   const recognitionRestartTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsGenerationRef = React.useRef(0);
   const initialStepSpeakDoneRef = React.useRef(false);
+  const partialCommandDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPartialTranscriptRef = React.useRef('');
 
   remainingSecondsRef.current = remainingSeconds;
   handsFreeEnabledRef.current = handsFreeEnabled;
@@ -750,6 +767,13 @@ export default function CookModeScreen() {
     if (recognitionRestartTimerRef.current) {
       clearTimeout(recognitionRestartTimerRef.current);
       recognitionRestartTimerRef.current = null;
+    }
+  }, []);
+
+  const clearPartialCommandDebounce = React.useCallback(() => {
+    if (partialCommandDebounceRef.current) {
+      clearTimeout(partialCommandDebounceRef.current);
+      partialCommandDebounceRef.current = null;
     }
   }, []);
 
@@ -1091,6 +1115,7 @@ export default function CookModeScreen() {
       if (prev) {
         isTtsSpeakingRef.current = false;
         clearRecognitionRestartTimer();
+        clearPartialCommandDebounce();
         speechRecognitionModule.stop();
         Speech.stop();
         setVoiceStatusText(ui.voiceOff);
@@ -1101,7 +1126,14 @@ export default function CookModeScreen() {
       speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
       return true;
     });
-  }, [clearRecognitionRestartTimer, cookModeSpeechRecognitionOptions, speechRecognitionModule, ui.voiceListening, ui.voiceOff]);
+  }, [
+    clearPartialCommandDebounce,
+    clearRecognitionRestartTimer,
+    cookModeSpeechRecognitionOptions,
+    speechRecognitionModule,
+    ui.voiceListening,
+    ui.voiceOff,
+  ]);
 
   const scrollByVoice = React.useCallback((delta: number) => {
     const maxY = Math.max(0, scrollContentHeightRef.current - scrollViewportHeightRef.current);
@@ -1186,6 +1218,25 @@ export default function CookModeScreen() {
     ]
   );
 
+  const tryExecuteVoiceTranscript = React.useCallback(
+    (transcript: string) => {
+      if (!transcript) return;
+      const now = Date.now();
+      if (now - lastVoiceCommandAtRef.current < 1200) return;
+
+      const command = parseVoiceCommand(transcript, resolvedVoiceLanguage);
+      if (!command) return;
+      if (isTtsSpeakingRef.current && !TTS_INTERRUPT_COMMANDS.has(command)) return;
+
+      setVoiceStatusText(`${ui.heardPrefix}: ${transcript}`);
+      lastVoiceTranscriptRef.current = transcript;
+      lastVoiceCommandAtRef.current = now;
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      runVoiceCommand(command);
+    },
+    [resolvedVoiceLanguage, runVoiceCommand, ui.heardPrefix]
+  );
+
   React.useEffect(() => {
     if (!speechRecognitionModule?.addListener) return;
 
@@ -1197,25 +1248,20 @@ export default function CookModeScreen() {
         if (transcript) {
           const prefix = isTtsSpeakingRef.current ? ui.voiceReadingStep : ui.voiceListeningLive;
           setVoiceStatusText(`${prefix}: "${truncateVoiceLiveHint(transcript)}"`);
+          if (Platform.OS === 'android') {
+            pendingPartialTranscriptRef.current = transcript;
+            clearPartialCommandDebounce();
+            partialCommandDebounceRef.current = setTimeout(() => {
+              partialCommandDebounceRef.current = null;
+              tryExecuteVoiceTranscript(pendingPartialTranscriptRef.current);
+            }, 650);
+          }
         }
         return;
       }
 
-      if (!transcript) return;
-
-      const now = Date.now();
-      if (now - lastVoiceCommandAtRef.current < 1200) return;
-
-      const command = parseVoiceCommand(transcript, resolvedVoiceLanguage);
-      if (!command) return;
-
-      if (isTtsSpeakingRef.current && !TTS_INTERRUPT_COMMANDS.has(command)) return;
-
-      setVoiceStatusText(`${ui.heardPrefix}: ${transcript}`);
-      lastVoiceTranscriptRef.current = transcript;
-      lastVoiceCommandAtRef.current = now;
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      runVoiceCommand(command);
+      clearPartialCommandDebounce();
+      tryExecuteVoiceTranscript(transcript ?? '');
     });
 
     const onError = speechRecognitionModule.addListener('error', () => {
@@ -1238,19 +1284,20 @@ export default function CookModeScreen() {
     });
 
     return () => {
+      clearPartialCommandDebounce();
       onResult?.remove();
       onError?.remove();
       onStart?.remove();
       onEnd?.remove();
     };
   }, [
+    clearPartialCommandDebounce,
     cookModeSpeechRecognitionOptions,
     handsFreeEnabled,
     recognitionRestartDelayMs,
-    resolvedVoiceLanguage,
-    runVoiceCommand,
     scheduleRecognitionRestart,
     speechRecognitionModule,
+    tryExecuteVoiceTranscript,
     ui,
   ]);
 
