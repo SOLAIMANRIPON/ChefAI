@@ -211,6 +211,9 @@ type CookModeUi = {
   voiceRestart: string;
   /** Mic paused while the step is read aloud (avoids restart loop with TTS). */
   voiceReadingStep: string;
+  /** Large tap target while TTS is speaking (voice pause backup). */
+  stopReadingNow: string;
+  stopReadingVoiceHint: string;
   micPermissionOff: string;
   voiceNeedsDevBuild: string;
   audioOnA11y: string;
@@ -253,6 +256,8 @@ const EN_UI: CookModeUi = {
   voiceReconnect: 'Voice command reconnecting...',
   voiceRestart: 'Voice command restarting...',
   voiceReadingStep: 'Reading step aloud…',
+  stopReadingNow: 'Stop reading',
+  stopReadingVoiceHint: 'Say pause now · থামাও · or tap below',
   micPermissionOff: 'Mic permission off - voice command disabled',
   voiceNeedsDevBuild: 'Voice command unavailable (dev build needed)',
   audioOnA11y: 'Turn audio on',
@@ -296,6 +301,8 @@ const COOK_UI_TEXT: Record<string, CookModeUi> = {
     voiceReconnect: 'Voice command reconnect হচ্ছে...',
     voiceRestart: 'Voice command restart হচ্ছে...',
     voiceReadingStep: 'ধাপ পড়া হচ্ছে…',
+    stopReadingNow: 'পড়া থামাও',
+    stopReadingVoiceHint: 'বলুন: pause now · থামাও · বা নিচে ট্যাপ',
     micPermissionOff: 'Mic permission off - voice command বন্ধ',
     voiceNeedsDevBuild: 'Voice command unavailable (dev build needed)',
     audioOnA11y: 'অডিও চালু করুন',
@@ -680,39 +687,47 @@ function applyAsrFixes(input: string, uiLanguage: string): string {
 }
 
 /** Last words of transcript — user command often trails step TTS bleed-through. */
-function trailingCommandWindow(text: string, wordCount = 6): string {
+function trailingCommandWindow(text: string, wordCount = 8): string {
   const parts = text.trim().split(/\s+/).filter(Boolean);
   if (parts.length <= wordCount) return text.trim();
   return parts.slice(-wordCount).join(' ');
 }
 
-/**
- * Liberal pause/stop detector (accent + ASR typos). Checked before strict fuzzy match.
- * Excludes timer phrases ("pause timer").
- */
-function detectPauseAudioIntent(raw: string, uiLanguage: string): boolean {
-  const body = stripLeadingWakeWord(
-    uiLanguage === 'বাংলা' ? normalizeBnCommandText(raw) : normalizeCommandText(raw)
-  );
-  if (!body) return false;
-  const windows = [trailingCommandWindow(body, 6), body];
-  const bnPause =
-    /\b(এখন থাম|থামাও|থাম|পজ নাও|পজ কর|পজ|পড়া থামাও|পড়া বন্ধ|ভয়েস থামাও)\b/;
-  const enPause =
-    /\b(pause now|pause voice|pause|paws now|pas now|stop reading|stop speaking|hold on|wait|quiet)\b/;
-  const timerCue = /\b(টাইমার|timer)\b/;
+/** Bilingual pause/stop — always checks English + Bangla (users mix languages during TTS). */
+function scanPauseIntent(raw: string): boolean {
+  if (!raw.trim()) return false;
+  const en = applyAsrFixes(stripLeadingWakeWord(normalizeCommandText(raw)), 'English');
+  const bn = applyAsrFixes(stripLeadingWakeWord(normalizeBnCommandText(raw)), 'বাংলা');
+  const windows = [en, bn, trailingCommandWindow(en, 8), trailingCommandWindow(bn, 8)];
+  const timerPause = (s: string) => /\b(timer|টাইমার)\b/.test(s) && /\b(pause|থাম|পজ)\b/.test(s);
+
+  const needlesEn = [
+    'pause now',
+    'pause voice',
+    'stop reading',
+    'stop speaking',
+    'hold on',
+    'paws now',
+    'pas now',
+    'paused',
+    'pause',
+    'wait',
+    'quiet',
+  ];
+  const needlesBn = ['এখন থাম', 'থামাও', 'থাম', 'পজ নাও', 'পজ কর', 'পড়া থামাও', 'পড়া বন্ধ', 'ভয়েস থামাও', 'পজ'];
 
   for (const window of windows) {
-    const fixed =
-      uiLanguage === 'বাংলা' ? applyAsrFixes(window, 'বাংলা') : applyAsrFixes(window, 'English');
-    if (timerCue.test(fixed) && /\b(pause|পজ|থাম)\b/.test(fixed)) continue;
-    if (bnPause.test(fixed) || enPause.test(fixed)) return true;
+    if (!window) continue;
+    if (timerPause(window)) continue;
+    if (needlesEn.some((n) => window.includes(n))) return true;
+    if (needlesBn.some((n) => window.includes(n))) return true;
+    if (/\b(pas|paws)\b/.test(window)) return true;
   }
   return false;
 }
 
 function resolveVoiceCommandFromTranscript(raw: string, uiLanguage: string): VoiceCommand {
-  if (detectPauseAudioIntent(raw, uiLanguage)) return 'pause_audio';
+  if (scanPauseIntent(raw)) return 'pause_audio';
   return parseVoiceCommand(raw, uiLanguage);
 }
 
@@ -823,6 +838,7 @@ export default function CookModeScreen() {
   const [timerStatus, setTimerStatus] = React.useState<'idle' | 'running' | 'paused'>('idle');
   const [finishedBanner, setFinishedBanner] = React.useState(false);
   const [audioPaused, setAudioPaused] = React.useState(false);
+  const [stepReadingAloud, setStepReadingAloud] = React.useState(false);
   const [handsFreeEnabled, setHandsFreeEnabled] = React.useState(false);
   const [voiceStatusText, setVoiceStatusText] = React.useState('Voice command off');
   const [speechRecognitionModule, setSpeechRecognitionModule] = React.useState<SpeechRecognitionModuleLike | null>(null);
@@ -847,6 +863,9 @@ export default function CookModeScreen() {
   const speakCurrentStepRef = React.useRef<(prefix?: string) => void>(() => {});
   const partialCommandDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPartialTranscriptRef = React.useRef('');
+  const ttsPartialAccumRef = React.useRef('');
+  const lastPauseInterruptAtRef = React.useRef(0);
+  const interruptStepReadingRef = React.useRef<(heard?: string) => void>(() => {});
 
   remainingSecondsRef.current = remainingSeconds;
   handsFreeEnabledRef.current = handsFreeEnabled;
@@ -1119,9 +1138,26 @@ export default function CookModeScreen() {
     const wasSpeaking = isTtsSpeakingRef.current;
     ttsGenerationRef.current += 1;
     isTtsSpeakingRef.current = false;
+    setStepReadingAloud(false);
+    ttsPartialAccumRef.current = '';
     Speech.stop();
     if (wasSpeaking) resumeMicAfterTts();
   }, [resumeMicAfterTts]);
+
+  const interruptStepReading = React.useCallback(
+    (heard?: string) => {
+      cancelStepTts();
+      setAudioPaused(true);
+      if (heard?.trim()) {
+        setVoiceStatusText(`${ui.heardPrefix}: ${truncateVoiceLiveHint(heard.trim())}`);
+      } else {
+        setVoiceStatusText(ui.stopReadingNow);
+      }
+    },
+    [cancelStepTts, ui.heardPrefix, ui.stopReadingNow]
+  );
+
+  interruptStepReadingRef.current = interruptStepReading;
 
   const speakCurrentStep = React.useCallback(
     (prefix?: string) => {
@@ -1132,6 +1168,8 @@ export default function CookModeScreen() {
       ttsGenerationRef.current = generation;
 
       isTtsSpeakingRef.current = true;
+      setStepReadingAloud(true);
+      ttsPartialAccumRef.current = '';
       setVoiceStatusText(ui.voiceReadingStep);
       Speech.stop();
       Speech.speak(spoken, {
@@ -1140,6 +1178,8 @@ export default function CookModeScreen() {
         onDone: () => {
           if (ttsGenerationRef.current !== generation) return;
           isTtsSpeakingRef.current = false;
+          setStepReadingAloud(false);
+          ttsPartialAccumRef.current = '';
           if (handsFreeEnabledRef.current) {
             setVoiceStatusText(ui.voiceListening);
             resumeMicAfterTts();
@@ -1148,6 +1188,8 @@ export default function CookModeScreen() {
         onStopped: () => {
           if (ttsGenerationRef.current !== generation) return;
           isTtsSpeakingRef.current = false;
+          setStepReadingAloud(false);
+          ttsPartialAccumRef.current = '';
           if (handsFreeEnabledRef.current) {
             setVoiceStatusText(ui.voiceListening);
             resumeMicAfterTts();
@@ -1156,6 +1198,8 @@ export default function CookModeScreen() {
         onError: () => {
           if (ttsGenerationRef.current !== generation) return;
           isTtsSpeakingRef.current = false;
+          setStepReadingAloud(false);
+          ttsPartialAccumRef.current = '';
           if (handsFreeEnabledRef.current) {
             setVoiceStatusText(ui.voiceListening);
             resumeMicAfterTts();
@@ -1199,6 +1243,8 @@ export default function CookModeScreen() {
         setTimeout(() => speakCurrentStep(), 80);
         return false;
       }
+      setStepReadingAloud(false);
+      ttsPartialAccumRef.current = '';
       Speech.stop();
       return true;
     });
@@ -1321,8 +1367,17 @@ export default function CookModeScreen() {
       if (!transcript) return;
       const now = Date.now();
       const command = resolveVoiceCommandFromTranscript(transcript, resolvedVoiceLanguage);
-      const cooldownMs =
-        command === 'pause_audio' && isTtsSpeakingRef.current ? 700 : 1200;
+
+      if (command === 'pause_audio' && isTtsSpeakingRef.current) {
+        if (now - lastPauseInterruptAtRef.current < 280) return;
+        lastPauseInterruptAtRef.current = now;
+        lastVoiceCommandAtRef.current = now;
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        interruptStepReading(transcript);
+        return;
+      }
+
+      const cooldownMs = TTS_INTERRUPT_COMMANDS.has(command) && isTtsSpeakingRef.current ? 450 : 1200;
       if (now - lastVoiceCommandAtRef.current < cooldownMs) return;
 
       if (!command) return;
@@ -1334,7 +1389,7 @@ export default function CookModeScreen() {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       runVoiceCommand(command);
     },
-    [resolvedVoiceLanguage, runVoiceCommand, ui.heardPrefix]
+    [interruptStepReading, resolvedVoiceLanguage, runVoiceCommand, ui.heardPrefix]
   );
 
   React.useEffect(() => {
@@ -1348,6 +1403,20 @@ export default function CookModeScreen() {
         if (transcript) {
           const prefix = isTtsSpeakingRef.current ? ui.voiceReadingStep : ui.voiceListeningLive;
           setVoiceStatusText(`${prefix}: "${truncateVoiceLiveHint(transcript)}"`);
+          if (isTtsSpeakingRef.current) {
+            ttsPartialAccumRef.current = `${ttsPartialAccumRef.current} ${transcript}`.trim().slice(-280);
+            if (scanPauseIntent(transcript) || scanPauseIntent(ttsPartialAccumRef.current)) {
+              clearPartialCommandDebounce();
+              const now = Date.now();
+              if (now - lastPauseInterruptAtRef.current >= 280) {
+                lastPauseInterruptAtRef.current = now;
+                lastVoiceCommandAtRef.current = now;
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                interruptStepReadingRef.current(transcript);
+              }
+              return;
+            }
+          }
           {
             pendingPartialTranscriptRef.current = transcript;
             if (isTtsSpeakingRef.current) {
@@ -1362,13 +1431,7 @@ export default function CookModeScreen() {
               }
             }
             clearPartialCommandDebounce();
-            const debounceMs =
-              isTtsSpeakingRef.current &&
-              detectPauseAudioIntent(transcript, resolvedVoiceLanguage)
-                ? 220
-                : isTtsSpeakingRef.current
-                  ? 380
-                  : 650;
+            const debounceMs = isTtsSpeakingRef.current ? 280 : 650;
             partialCommandDebounceRef.current = setTimeout(() => {
               partialCommandDebounceRef.current = null;
               tryExecuteVoiceTranscript(pendingPartialTranscriptRef.current);
@@ -1568,6 +1631,21 @@ export default function CookModeScreen() {
           <View style={styles.stepCard}>
             <Text style={styles.stepBody}>{currentStepText}</Text>
           </View>
+
+          {stepReadingAloud && !audioPaused ? (
+            <TouchableOpacity
+              style={styles.stopReadingBtn}
+              onPress={() => interruptStepReading()}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={ui.stopReadingNow}>
+              <MaterialIcons name="pause-circle-filled" size={28} color="#000" />
+              <View style={styles.stopReadingBtnTextWrap}>
+                <Text style={styles.stopReadingBtnTitle}>{ui.stopReadingNow}</Text>
+                <Text style={styles.stopReadingBtnHint}>{ui.stopReadingVoiceHint}</Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
 
           <View style={styles.navRow}>
             <TouchableOpacity
@@ -1788,6 +1866,19 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
     marginBottom: 14,
   },
+  stopReadingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: GOLD,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+  },
+  stopReadingBtnTextWrap: { flex: 1 },
+  stopReadingBtnTitle: { color: '#000', fontSize: 16, fontWeight: '800' },
+  stopReadingBtnHint: { color: '#333', fontSize: 11, marginTop: 2, lineHeight: 15 },
   stepBody: { color: '#e8e8e8', fontSize: 17, lineHeight: 26 },
   navRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   secondaryBtn: {
