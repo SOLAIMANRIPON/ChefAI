@@ -368,7 +368,18 @@ const COMMAND_CANONICALS: Record<string, Record<Exclude<VoiceCommand, null>, str
     next: ['next step'],
     previous: ['previous step'],
     repeat: ['repeat step', 'say again'],
-    pause_audio: ['pause now', 'pause', 'pause voice', 'stop reading', 'stop speaking'],
+    pause_audio: [
+      'pause now',
+      'pause',
+      'pause voice',
+      'paws now',
+      'pas now',
+      'paused now',
+      'stop reading',
+      'stop speaking',
+      'wait',
+      'hold on',
+    ],
     resume_audio: ['speak now', 'resume voice'],
     mark_done: ['mark this step done', 'step done'],
     pause_timer: ['pause timer'],
@@ -590,17 +601,37 @@ function getCommandCatalog(uiLanguage: string): Record<Exclude<VoiceCommand, nul
  * Short bias list for the OS recognizer (Android EXTRA_BIASING_STRINGS caps effective size).
  * Uses the UI language catalog only — not the merged English fallback — to avoid huge lists.
  */
-function collectSpeechBiasStrings(uiLanguage: string, maxStrings = 28): string[] {
-  const catalog = COMMAND_CANONICALS[uiLanguage] ?? COMMAND_CANONICALS.English;
+const SPEECH_BIAS_INTENT_ORDER: Exclude<VoiceCommand, null>[] = [
+  'pause_audio',
+  'mark_done',
+  'next',
+  'previous',
+  'resume_audio',
+  'pause_timer',
+  'start_step_timer',
+  'repeat',
+  'stop_timer',
+  'resume_timer',
+  'scroll_down',
+  'scroll_up',
+  'scroll_bottom',
+  'scroll_top',
+];
+
+function collectSpeechBiasStrings(uiLanguage: string, maxStrings = 36): string[] {
+  const catalog = getCommandCatalog(uiLanguage);
   const seen = new Set<string>();
   const out: string[] = [];
-  (Object.keys(catalog) as Exclude<VoiceCommand, null>[]).forEach((intent) => {
-    catalog[intent].forEach((phrase) => {
-      const t = phrase.trim();
-      if (t.length < 2 || seen.has(t)) return;
-      seen.add(t);
-      out.push(t);
-    });
+  const pushPhrase = (phrase: string) => {
+    const t = phrase.trim();
+    if (t.length < 2 || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  // Bias ASR toward pause/stop first — hardest during step TTS.
+  ['pause now', 'pause', 'stop reading', 'পজ নাও', 'থামাও', 'থাম'].forEach(pushPhrase);
+  SPEECH_BIAS_INTENT_ORDER.forEach((intent) => {
+    catalog[intent].forEach((phrase) => pushPhrase(phrase));
   });
   return out.slice(0, maxStrings);
 }
@@ -637,11 +668,52 @@ function applyAsrFixes(input: string, uiLanguage: string): string {
     .replace(/\bnxt\b/g, 'next')
     .replace(/\bprev\b/g, 'previous')
     .replace(/\bpleas\b/g, 'please')
+    .replace(/\bpaws\b/g, 'pause')
+    .replace(/\bpas\b/g, 'pause')
+    .replace(/\bpoz\b/g, 'pause')
+    .replace(/\bpaused\b/g, 'pause')
     .replace(/\btimerr\b/g, 'timer')
     .replace(/\bresum\b/g, 'resume')
     .replace(/\brepet\b/g, 'repeat')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Last words of transcript — user command often trails step TTS bleed-through. */
+function trailingCommandWindow(text: string, wordCount = 6): string {
+  const parts = text.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= wordCount) return text.trim();
+  return parts.slice(-wordCount).join(' ');
+}
+
+/**
+ * Liberal pause/stop detector (accent + ASR typos). Checked before strict fuzzy match.
+ * Excludes timer phrases ("pause timer").
+ */
+function detectPauseAudioIntent(raw: string, uiLanguage: string): boolean {
+  const body = stripLeadingWakeWord(
+    uiLanguage === 'বাংলা' ? normalizeBnCommandText(raw) : normalizeCommandText(raw)
+  );
+  if (!body) return false;
+  const windows = [trailingCommandWindow(body, 6), body];
+  const bnPause =
+    /\b(এখন থাম|থামাও|থাম|পজ নাও|পজ কর|পজ|পড়া থামাও|পড়া বন্ধ|ভয়েস থামাও)\b/;
+  const enPause =
+    /\b(pause now|pause voice|pause|paws now|pas now|stop reading|stop speaking|hold on|wait|quiet)\b/;
+  const timerCue = /\b(টাইমার|timer)\b/;
+
+  for (const window of windows) {
+    const fixed =
+      uiLanguage === 'বাংলা' ? applyAsrFixes(window, 'বাংলা') : applyAsrFixes(window, 'English');
+    if (timerCue.test(fixed) && /\b(pause|পজ|থাম)\b/.test(fixed)) continue;
+    if (bnPause.test(fixed) || enPause.test(fixed)) return true;
+  }
+  return false;
+}
+
+function resolveVoiceCommandFromTranscript(raw: string, uiLanguage: string): VoiceCommand {
+  if (detectPauseAudioIntent(raw, uiLanguage)) return 'pause_audio';
+  return parseVoiceCommand(raw, uiLanguage);
 }
 
 function levenshtein(a: string, b: string): number {
@@ -687,7 +759,9 @@ function bestFuzzyCommandMatch(
   (Object.keys(catalog) as Exclude<VoiceCommand, null>[]).forEach((command) => {
     catalog[command].forEach((phrase) => {
       const normalizedPhrase = applyAsrFixes(phrase, uiLanguage);
-      if (normalizedPhrase.length >= 5 && text.includes(normalizedPhrase)) {
+      const minIncludes =
+        command === 'pause_audio' ? 4 : 5;
+      if (normalizedPhrase.length >= minIncludes && text.includes(normalizedPhrase)) {
         if (0 < best.distance || (best.distance === 0 && normalizedPhrase.length > best.phraseLength)) {
           best = { command, distance: 0, phraseLength: normalizedPhrase.length };
         }
@@ -1246,9 +1320,11 @@ export default function CookModeScreen() {
     (transcript: string) => {
       if (!transcript) return;
       const now = Date.now();
-      if (now - lastVoiceCommandAtRef.current < 1200) return;
+      const command = resolveVoiceCommandFromTranscript(transcript, resolvedVoiceLanguage);
+      const cooldownMs =
+        command === 'pause_audio' && isTtsSpeakingRef.current ? 700 : 1200;
+      if (now - lastVoiceCommandAtRef.current < cooldownMs) return;
 
-      const command = parseVoiceCommand(transcript, resolvedVoiceLanguage);
       if (!command) return;
       if (isTtsSpeakingRef.current && !TTS_INTERRUPT_COMMANDS.has(command)) return;
 
@@ -1272,10 +1348,13 @@ export default function CookModeScreen() {
         if (transcript) {
           const prefix = isTtsSpeakingRef.current ? ui.voiceReadingStep : ui.voiceListeningLive;
           setVoiceStatusText(`${prefix}: "${truncateVoiceLiveHint(transcript)}"`);
-          if (Platform.OS === 'android') {
+          {
             pendingPartialTranscriptRef.current = transcript;
             if (isTtsSpeakingRef.current) {
-              const interruptCmd = parseVoiceCommand(transcript, resolvedVoiceLanguage);
+              const interruptCmd = resolveVoiceCommandFromTranscript(
+                transcript,
+                resolvedVoiceLanguage
+              );
               if (interruptCmd && TTS_INTERRUPT_COMMANDS.has(interruptCmd)) {
                 clearPartialCommandDebounce();
                 tryExecuteVoiceTranscript(transcript);
@@ -1283,7 +1362,13 @@ export default function CookModeScreen() {
               }
             }
             clearPartialCommandDebounce();
-            const debounceMs = isTtsSpeakingRef.current ? 380 : 650;
+            const debounceMs =
+              isTtsSpeakingRef.current &&
+              detectPauseAudioIntent(transcript, resolvedVoiceLanguage)
+                ? 220
+                : isTtsSpeakingRef.current
+                  ? 380
+                  : 650;
             partialCommandDebounceRef.current = setTimeout(() => {
               partialCommandDebounceRef.current = null;
               tryExecuteVoiceTranscript(pendingPartialTranscriptRef.current);
