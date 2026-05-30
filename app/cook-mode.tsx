@@ -342,7 +342,17 @@ const COMMAND_CANONICALS: Record<string, Record<Exclude<VoiceCommand, null>, str
     next: ['পরের ধাপ বল', 'পরের ধাপ', 'নেক্সট ধাপ'],
     previous: ['আগের ধাপ বল', 'আগের ধাপ'],
     repeat: ['আবার বল', 'আবার পড়ো', 'রিপিট কর'],
-    pause_audio: ['এখন থাম', 'থাম', 'থামাও', 'ভয়েস থামাও', 'পড়া থামাও', 'পড়া বন্ধ'],
+    pause_audio: [
+      'এখন থাম',
+      'থাম',
+      'থামাও',
+      'পজ নাও',
+      'পজ কর',
+      'পজ',
+      'ভয়েস থামাও',
+      'পড়া থামাও',
+      'পড়া বন্ধ',
+    ],
     resume_audio: ['এখন বল', 'আবার বলো', 'চালাও'],
     mark_done: ['এই ধাপ শেষ', 'ধাপ শেষ', 'এই ধাপ সম্পন্ন', 'ধাপ সম্পন্ন', 'শেষ কর', 'সম্পন্ন'],
     pause_timer: ['টাইমার থামাও', 'টাইমার পজ কর'],
@@ -358,7 +368,7 @@ const COMMAND_CANONICALS: Record<string, Record<Exclude<VoiceCommand, null>, str
     next: ['next step'],
     previous: ['previous step'],
     repeat: ['repeat step', 'say again'],
-    pause_audio: ['pause now', 'pause voice'],
+    pause_audio: ['pause now', 'pause', 'pause voice', 'stop reading', 'stop speaking'],
     resume_audio: ['speak now', 'resume voice'],
     mark_done: ['mark this step done', 'step done'],
     pause_timer: ['pause timer'],
@@ -618,6 +628,8 @@ function applyAsrFixes(input: string, uiLanguage: string): string {
       .replace(/\bপরর\b/g, 'পরের')
       .replace(/\bধাব\b/g, 'ধাপ')
       .replace(/\bকমপ্লিট\b/g, 'সম্পন্ন')
+      .replace(/\bpause\b/g, 'থাম')
+      .replace(/\bপজ\b/g, 'থাম')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -756,7 +768,9 @@ export default function CookModeScreen() {
   const handsFreeEnabledRef = React.useRef(false);
   const recognitionRestartTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const ttsGenerationRef = React.useRef(0);
-  const initialStepSpeakDoneRef = React.useRef(false);
+  /** Last step index auto-spoken; -1 = fresh Cook Mode entry. Prevents double-speak when mic turns on. */
+  const lastAutoSpokenStepRef = React.useRef(-1);
+  const speakCurrentStepRef = React.useRef<(prefix?: string) => void>(() => {});
   const partialCommandDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPartialTranscriptRef = React.useRef('');
 
@@ -1078,22 +1092,32 @@ export default function CookModeScreen() {
     [audioPaused, currentStepText, resolvedVoiceLanguage, resumeMicAfterTts, speechLocale, ui.voiceListening, ui.voiceReadingStep]
   );
 
-  /** Speak soon after load; first entry waits briefly so mic can start before TTS. */
+  speakCurrentStepRef.current = speakCurrentStep;
+
+  React.useEffect(() => {
+    if (loading) {
+      lastAutoSpokenStepRef.current = -1;
+    }
+  }, [loading]);
+
+  /** Auto-read step once per index; do not re-fire when hands-free mic turns on (was double-speak on slow phones). */
   React.useEffect(() => {
     if (loading || stepCount === 0 || audioPaused) return;
+    if (lastAutoSpokenStepRef.current === safeIndex) return;
+
     const stepNumber =
       resolvedVoiceLanguage === 'বাংলা' ? toBanglaDigits(String(safeIndex + 1)) : String(safeIndex + 1);
     const spokenPrefix = `${spokenStepPrefix} ${stepNumber}`;
+    const isFreshEntry = lastAutoSpokenStepRef.current < 0;
+    const delayMs = isFreshEntry ? (Platform.OS === 'android' ? 850 : 380) : 100;
 
-    if (!initialStepSpeakDoneRef.current) {
-      initialStepSpeakDoneRef.current = true;
-      const delayMs = handsFreeEnabled ? 150 : 650;
-      const timer = setTimeout(() => speakCurrentStep(spokenPrefix), delayMs);
-      return () => clearTimeout(timer);
-    }
+    const timer = setTimeout(() => {
+      lastAutoSpokenStepRef.current = safeIndex;
+      speakCurrentStepRef.current(spokenPrefix);
+    }, delayMs);
 
-    speakCurrentStep(spokenPrefix);
-  }, [audioPaused, loading, resolvedVoiceLanguage, safeIndex, speakCurrentStep, spokenStepPrefix, stepCount, handsFreeEnabled]);
+    return () => clearTimeout(timer);
+  }, [audioPaused, loading, resolvedVoiceLanguage, safeIndex, spokenStepPrefix, stepCount]);
 
   const toggleAudioMute = React.useCallback(() => {
     setAudioPaused((prev) => {
@@ -1250,11 +1274,20 @@ export default function CookModeScreen() {
           setVoiceStatusText(`${prefix}: "${truncateVoiceLiveHint(transcript)}"`);
           if (Platform.OS === 'android') {
             pendingPartialTranscriptRef.current = transcript;
+            if (isTtsSpeakingRef.current) {
+              const interruptCmd = parseVoiceCommand(transcript, resolvedVoiceLanguage);
+              if (interruptCmd && TTS_INTERRUPT_COMMANDS.has(interruptCmd)) {
+                clearPartialCommandDebounce();
+                tryExecuteVoiceTranscript(transcript);
+                return;
+              }
+            }
             clearPartialCommandDebounce();
+            const debounceMs = isTtsSpeakingRef.current ? 380 : 650;
             partialCommandDebounceRef.current = setTimeout(() => {
               partialCommandDebounceRef.current = null;
               tryExecuteVoiceTranscript(pendingPartialTranscriptRef.current);
-            }, 650);
+            }, debounceMs);
           }
         }
         return;
@@ -1297,6 +1330,7 @@ export default function CookModeScreen() {
     recognitionRestartDelayMs,
     scheduleRecognitionRestart,
     speechRecognitionModule,
+    resolvedVoiceLanguage,
     tryExecuteVoiceTranscript,
     ui,
   ]);
