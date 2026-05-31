@@ -104,6 +104,11 @@ async function resolveSpeechRecognitionModule(): Promise<SpeechRecognitionModule
 
 const BANGLA_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
 
+function formatTimerMinuteChip(minutes: number, uiLanguage: string, minuteShort: string): string {
+  const n = uiLanguage === 'বাংলা' ? toBanglaDigits(String(minutes)) : String(minutes);
+  return `${n} ${minuteShort}`;
+}
+
 function toBanglaDigits(input: string): string {
   return input.replace(/\d/g, (d) => BANGLA_DIGITS[Number(d)] ?? d);
 }
@@ -188,6 +193,10 @@ type CookModeUi = {
   doneStep: string;
   timer: string;
   minutes: string;
+  /** Preset chip suffix, e.g. "min" / "মি". */
+  minuteShort: string;
+  /** Sticky timer +1 control, e.g. "+1 min" / "+১ মি". */
+  plusOneMinute: string;
   start: string;
   noStepTime: string;
   checklist: string;
@@ -236,6 +245,8 @@ const EN_UI: CookModeUi = {
   doneStep: 'Mark step done',
   timer: 'Timer',
   minutes: 'Minutes',
+  minuteShort: 'min',
+  plusOneMinute: '+1 min',
   start: 'Start',
   noStepTime: 'No time mentioned in this step. Enter minutes below to start.',
   checklist: 'Checklist',
@@ -281,6 +292,8 @@ const COOK_UI_TEXT: Record<string, CookModeUi> = {
     doneStep: 'এই ধাপ শেষ',
     timer: 'টাইমার',
     minutes: 'মিনিট',
+    minuteShort: 'মি',
+    plusOneMinute: '+১ মি',
     start: 'শুরু',
     noStepTime: 'এই ধাপে সময় উল্লেখ নেই—নিচে মিনিট লিখে শুরু করুন।',
     checklist: 'চেকলিস্ট',
@@ -1712,7 +1725,9 @@ export default function CookModeScreen() {
                   key={m}
                   style={styles.presetChip}
                   onPress={() => startTimerSeconds(m * 60, truncateLabel(currentStepText))}>
-                  <Text style={styles.presetChipText}>{m} মি</Text>
+                  <Text style={styles.presetChipText}>
+                    {formatTimerMinuteChip(m, resolvedVoiceLanguage, ui.minuteShort)}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -1777,7 +1792,7 @@ export default function CookModeScreen() {
                     />
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.timerIconBtn} onPress={addOneMinute}>
-                    <Text style={styles.plusOneText}>+১ মি</Text>
+                    <Text style={styles.plusOneText}>{ui.plusOneMinute}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.timerIconBtn} onPress={stopTimerFully}>
                     <MaterialIcons name="stop" size={26} color="#c77" />

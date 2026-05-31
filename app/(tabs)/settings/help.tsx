@@ -7,6 +7,7 @@ import {
 import { getSavedHelpPickerValue, setSavedHelpPickerValue } from '@/constants/help-storage';
 import type { HelpBundle, HelpFaq, HelpTopic } from '@/constants/help-types';
 import {
+  formatCoreLanguagePickerLabel,
   RECIPE_CORE_LANGUAGES,
   RECIPE_COUNTRY_PICKER_OPTIONS,
   pickerValueToHelpLangId,
@@ -130,7 +131,7 @@ export default function SettingsHelpScreen() {
                   style={styles.langChip}
                   onPress={() => void onPickHelpOption(item)}
                   activeOpacity={0.85}>
-                  <Text style={styles.langChipText}>{item}</Text>
+                  <Text style={styles.langChipText}>{formatCoreLanguagePickerLabel(item)}</Text>
                 </TouchableOpacity>
               ))}
             </View>

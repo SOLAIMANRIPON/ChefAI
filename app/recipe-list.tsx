@@ -1,6 +1,7 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
+import { formatCoreLanguagePickerLabel } from '@/constants/recipe-language-options';
 import {
   normalizeDifficultyLevel,
   normalizeDietPreference,
@@ -81,7 +82,7 @@ export default function RecipeListScreen() {
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.summaryText}>
-          Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}  |  Mode:{' '}
+          Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {formatCoreLanguagePickerLabel(selectedLang)}  |  Mode:{' '}
           {generationMode}
           {'  |  '}
           Diet: {dietPreference}  |  Spice: {spiceLevel}

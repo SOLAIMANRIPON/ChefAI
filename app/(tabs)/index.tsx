@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import {
+  formatCoreLanguagePickerLabel,
   RECIPE_CORE_LANGUAGES,
   RECIPE_COUNTRY_PICKER_OPTIONS,
   RECIPE_CUISINE_PICKER_OPTIONS,
@@ -89,7 +90,7 @@ export default function HomeScreen() {
             <Text style={styles.modalSectionTitle}>Languages</Text>
             {coreLanguages.map((item) => (
               <TouchableOpacity key={`lang-${item}`} style={styles.modalItem} onPress={() => { onSelect(item); onClose(); }}>
-                <Text style={styles.modalItemText}>{item}</Text>
+                <Text style={styles.modalItemText}>{formatCoreLanguagePickerLabel(item)}</Text>
               </TouchableOpacity>
             ))}
 
@@ -125,7 +126,7 @@ export default function HomeScreen() {
               <TouchableOpacity style={styles.pickerBtn} onPress={() => setLangModal(true)}>
                 <Text style={styles.pickerLabel}>LANGUAGE</Text>
                 <Text style={styles.pickerValue} numberOfLines={2}>
-                  {selectedLang}
+                  {formatCoreLanguagePickerLabel(selectedLang)}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.pickerBtn} onPress={() => setCuisineModal(true)}>

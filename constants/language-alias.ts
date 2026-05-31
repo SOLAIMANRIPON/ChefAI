@@ -114,6 +114,7 @@ const CORE_LANGUAGE_SET = new Set<string>([
 
 export function resolveUiLanguageKey(selectedLang: string): string {
   const raw = selectedLang.trim();
+  if (raw === 'Bangla' || raw === 'Bengali') return 'বাংলা';
   if (languageAliasByCountry[raw]) return languageAliasByCountry[raw];
   if (CORE_LANGUAGE_SET.has(raw)) return raw;
   if (WORLD_COUNTRY_SET.has(raw)) return 'English';
