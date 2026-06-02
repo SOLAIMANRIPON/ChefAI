@@ -40,6 +40,13 @@ export default function RecipeListScreen() {
   const servings = parseServingsParam(params.servings);
   const difficultyLevel = normalizeDifficultyLevel(params.difficultyLevel);
   const cookTimeMinutes = parseCookTimeMinutesParam(params.cookTimeMinutes);
+
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const dietLabel = dietPreference === 'none' ? 'Any' : dietPreference === 'gluten_free' ? 'Gluten-free' : cap(dietPreference);
+  const modeLabel = cap(generationMode);
+  const spiceLabel = cap(spiceLevel);
+  const difficultyLabel = cap(difficultyLevel);
+
   const [selectedRecipeLoading, setSelectedRecipeLoading] = useState<string | null>(null);
 
   const recipes = useMemo(() => {
@@ -83,12 +90,12 @@ export default function RecipeListScreen() {
         </TouchableOpacity>
         <Text style={styles.summaryText}>
           Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {formatCoreLanguagePickerLabel(selectedLang)}  |  Mode:{' '}
-          {generationMode}
+          {modeLabel}
           {'  |  '}
-          Diet: {dietPreference}  |  Spice: {spiceLevel}
+          Diet: {dietLabel}  |  Spice: {spiceLabel}
           {maxCaloriesPerMeal ? `  |  Max kcal: ${maxCaloriesPerMeal}` : ''}
           {`  |  Servings: ${servings}`}
-          {`  |  Difficulty: ${difficultyLevel}`}
+          {`  |  Difficulty: ${difficultyLabel}`}
           {cookTimeMinutes != null ? `  |  Time: ${cookTimeMinutes} min` : ''}
         </Text>
 
@@ -106,7 +113,7 @@ export default function RecipeListScreen() {
                 {selectedRecipeLoading === item ? (
                   <View style={styles.recipeItemLoading}>
                     <ActivityIndicator size="small" color="#d3b275" />
-                    <Text style={styles.recipeListItemText}>Loading...</Text>
+                    <Text style={styles.recipeListItemText}>Loading…</Text>
                   </View>
                 ) : (
                   <Text style={styles.recipeListItemText}>{item}</Text>

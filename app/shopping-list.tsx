@@ -92,13 +92,13 @@ type ShoppingUi = {
 const EN_SHOPPING_UI: ShoppingUi = {
   back: 'Back',
   fallbackTitle: 'Shopping list',
-  remainingOf: (remaining, total) => `Remaining ${remaining} / Total ${total}`,
+  remainingOf: (remaining, total) => `${remaining} of ${total} remaining`,
   regenerate: 'Regenerate list',
   fallbackNote:
     'Server list unavailable — auto-extracted a short list from the recipe text. Deploy the latest backend for more accurate results.',
   generating: 'Building ingredient list…',
   loading: 'Loading…',
-  errorNoRecipeId: 'Recipe id missing.',
+  errorNoRecipeId: 'Recipe ID missing.',
   errorRecipeNotFound: 'Recipe not found. Please pick a saved recipe first.',
   errorEmptyRecipe: 'Recipe is empty — cannot build a shopping list.',
   errorLoadFailed: 'Failed to load.',
@@ -106,7 +106,7 @@ const EN_SHOPPING_UI: ShoppingUi = {
   errorListBuildServer:
     'Could not build the list. Update the backend, or make sure the recipe lists ingredients with quantities.',
   errorListBuildNoApiBase:
-    'Could not build the list. Set EXPO_PUBLIC_API_BASE_URL or provide more recipe text.',
+    'Could not build the list. Check your connection or add more ingredient detail to the recipe.',
   emptyItems: 'No items.',
 };
 

@@ -117,6 +117,12 @@ export default function RecipeDetailsScreen() {
   const cookTimeMinutes = parseCookTimeMinutesParam(params.cookTimeMinutes);
   const recipeId = typeof params.recipeId === 'string' ? params.recipeId.trim() : '';
 
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const dietLabel = dietPreference === 'none' ? 'Any' : dietPreference === 'gluten_free' ? 'Gluten-free' : cap(dietPreference);
+  const modeLabel = cap(generationMode);
+  const spiceLabel = cap(spiceLevel);
+  const difficultyLabel = cap(difficultyLevel);
+
   const [dishName, setDishName] = useState(recipeName);
   const [recipe, setRecipe] = useState('');
   const [structured, setStructured] = useState<StructuredRecipe>(EMPTY_STRUCTURED);
@@ -764,12 +770,12 @@ export default function RecipeDetailsScreen() {
         </TouchableOpacity>
         <Text style={styles.summaryText}>
           Ingredient: {ingredient || 'N/A'}  |  Cuisine: {selectedCuisine}  |  Language: {selectedLang}  |  Mode:{' '}
-          {generationMode}
+          {modeLabel}
           {'  |  '}
-          Diet: {dietPreference}  |  Spice: {spiceLevel}
+          Diet: {dietLabel}  |  Spice: {spiceLabel}
           {maxCaloriesPerMeal != null ? `  |  Max kcal: ${maxCaloriesPerMeal}` : ''}
           {`  |  Servings: ${servings}`}
-          {`  |  Difficulty: ${difficultyLevel}`}
+          {`  |  Difficulty: ${difficultyLabel}`}
           {cookTimeMinutes != null ? `  |  Time: ${cookTimeMinutes} min` : ''}
         </Text>
         {awaitingPlanChoice ? (
@@ -789,14 +795,14 @@ export default function RecipeDetailsScreen() {
               onPress={onChooseTextPlan}
               accessibilityRole="button"
               accessibilityHint={`Costs ${billing.creditCostTextRecipe ?? 1} credit, about USD ${textUsdHint}`}>
-              <Text style={styles.planOptionTitle}>Go with only text recipe</Text>
+              <Text style={styles.planOptionTitle}>Text recipe only</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.planOption}
               onPress={onChoosePhotoPlan}
               accessibilityRole="button"
               accessibilityHint={`Costs ${billing.creditCostPhotoRecipe ?? 3} credits, about USD ${photoUsdHint}`}>
-              <Text style={styles.planOptionTitle}>Go with photo recipe</Text>
+              <Text style={styles.planOptionTitle}>Recipe with photo</Text>
             </TouchableOpacity>
             <View style={styles.planFooterButtons}>
               <TouchableOpacity
@@ -833,7 +839,7 @@ export default function RecipeDetailsScreen() {
                 style={styles.saveButton}
                 onPress={saveRecipe}
                 disabled={saving || loading || !recipe}>
-                <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Recipe'}</Text>
+                <Text style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save Recipe'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -843,8 +849,8 @@ export default function RecipeDetailsScreen() {
                 onPress={openCookMode}
                 disabled={loading || !recipe}
                 accessibilityRole="button"
-                accessibilityLabel="Cook mode">
-                <Text style={styles.cookModeButtonText}>Cook mode</Text>
+                accessibilityLabel="Cook Mode">
+                <Text style={styles.cookModeButtonText}>Cook Mode</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity

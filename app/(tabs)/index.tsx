@@ -116,7 +116,7 @@ export default function HomeScreen() {
         <View style={styles.topZone}>
           <View style={styles.header}>
             <Image source={require('@/assets/images/logo-main.png')} style={styles.logo} resizeMode="contain" />
-            <Text style={styles.tagline}>YOUR AI POWERED KITCHEN ASSISTANT</Text>
+            <Text style={styles.tagline}>YOUR AI-POWERED KITCHEN ASSISTANT</Text>
           </View>
         </View>
 

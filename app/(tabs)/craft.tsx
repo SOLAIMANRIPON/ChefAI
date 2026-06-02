@@ -79,7 +79,7 @@ const uiTranslations: Record<
     creativeModeLabel: 'সৃজনশীল',
   },
   English: {
-    ingredientPlaceholder: 'Enter ingredient or dish name...',
+    ingredientPlaceholder: 'Enter an ingredient or a dish name...',
     modeSectionLabel: 'Recipe mode',
     strictModeLabel: 'Strict',
     creativeModeLabel: 'Creative',
@@ -194,9 +194,9 @@ const dietSpiceUi = {
     spiceMedium: 'Medium',
     spiceHot: 'Hot',
     caloriesSectionLabel: 'Max kcal per meal (optional)',
-    caloriesPlaceholder: 'e.g. 600 — empty = no limit',
+    caloriesPlaceholder: 'e.g. 600 — leave blank for no limit',
     servingsSectionLabel: 'Servings (people)',
-    servingsPlaceholder: 'e.g. 4 — empty defaults to 4 (max 20)',
+    servingsPlaceholder: 'e.g. 4 — leave blank to default to 4 (max 20)',
     difficultySectionLabel: 'Recipe difficulty',
     difficultyEasy: 'Easy',
     difficultyMedium: 'Medium',
@@ -225,7 +225,7 @@ const dietConflictUi = {
     btnContinue: 'তবু চালিয়ে যান',
   },
   English: {
-    title: 'Diet vs input mismatch',
+    title: 'Diet and ingredient mismatch',
     msgVegetarian: 'You chose Vegetarian, but your text suggests meat or seafood. What would you like to do?',
     msgVeganFlesh: 'You chose Vegan, but your text suggests meat or seafood. What would you like to do?',
     msgVeganAnimal:
@@ -233,7 +233,7 @@ const dietConflictUi = {
     msgGluten:
       'You chose Gluten-free, but your text suggests wheat flour or other gluten sources. What would you like to do?',
     btnCancel: 'Cancel',
-    btnResetDiet: 'Set diet to Any & continue',
+    btnResetDiet: 'Set diet to Any and continue',
     btnContinue: 'Continue anyway',
   },
 } as const;
@@ -351,18 +351,18 @@ export default function CraftScreen() {
       );
 
       if (!response.ok) {
-        let message = `Backend request failed (${response.status})`;
-        try {
-          const errorJson = await response.json();
-          if (typeof errorJson?.message === 'string') message = errorJson.message;
-        } catch {
-          // Ignore parsing error for non-json responses.
-        }
-        throw new Error(message);
+        let message = `Server request failed (${response.status})`;
+      try {
+        const errorJson = await response.json();
+        if (typeof errorJson?.message === 'string') message = errorJson.message;
+      } catch {
+        // Ignore parsing error for non-json responses.
       }
+      throw new Error(message);
+    }
 
-      const data = await response.json();
-      const ingredients = Array.isArray(data?.ingredients)
+    const data = await response.json();
+    const ingredients = Array.isArray(data?.ingredients)
         ? data.ingredients.filter((x: unknown) => typeof x === 'string').map((x: string) => x.trim()).filter(Boolean)
         : [];
       if (!ingredients.length) {
@@ -460,7 +460,7 @@ export default function CraftScreen() {
     );
 
     if (!response.ok) {
-      let message = `Backend request failed (${response.status})`;
+      let message = `Server request failed (${response.status})`;
       try {
         const errorJson = await response.json();
         if (typeof errorJson?.message === 'string') message = errorJson.message;
@@ -472,7 +472,7 @@ export default function CraftScreen() {
 
     const data = await response.json();
     const recipes = Array.isArray(data?.recipes) ? data.recipes.filter((name: unknown) => typeof name === 'string') : [];
-    if (recipes.length === 0) throw new Error('No recipes returned from backend');
+    if (recipes.length === 0) throw new Error('No recipes found. Please try again.');
     return recipes.slice(0, 10);
   };
 
@@ -735,7 +735,7 @@ export default function CraftScreen() {
             onPress={startVoiceInput}
             disabled={loading || recognizingIngredients}>
             <MaterialIcons name="mic" size={18} color="#d3b275" />
-            <Text style={styles.voiceButtonText}>Use Voice Input (Keyboard Mic)</Text>
+            <Text style={styles.voiceButtonText}>Use keyboard mic</Text>
           </TouchableOpacity>
           {showVoiceFallbackHint ? (
             <Text style={styles.voiceHintText}>Keyboard খুলে mic আইকনে ট্যাপ করে কথা বলুন.</Text>

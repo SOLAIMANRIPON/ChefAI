@@ -369,7 +369,7 @@ export async function purchaseCreditsWithGooglePlay(params: {
         ? ` Server: ${lastRecoveryError}`
         : '';
       throw new Error(
-        `Google Play still has unfinished test purchases (Small/Medium/Large). In Play Console → Order management, refund each test order, wait up to 48 hours, or sign in with a different license-tester Gmail on this phone.${hint}`
+        `A previous purchase is still processing. Please wait a few minutes and try again, or contact support.${hint}`
       );
     }
 
