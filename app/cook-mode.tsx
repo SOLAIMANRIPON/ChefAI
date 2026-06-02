@@ -7,7 +7,7 @@ import {
   scheduleCookTimerNotification,
 } from '@/lib/cook-timer-notifications';
 import { extractMinutesFromStep, parseRecipeSteps } from '@/lib/recipe-steps';
-import { playTimerDoneSound } from '@/lib/timer-alarm';
+import { playTimerDoneSound, startTickingSound, stopTickingSound } from '@/lib/timer-alarm';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import {
   Alert,
+  Animated,
   Platform,
   ScrollView,
   StyleSheet,
@@ -28,6 +29,65 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 const GOLD = '#d3b275';
 const TIMER_STICKY_MIN_HEIGHT = 56;
+
+const BAR_COUNT = 5;
+const BAR_DURATIONS = [420, 320, 500, 370, 450];
+const BAR_MIN_HEIGHT = 4;
+const BAR_MAX_HEIGHT = 22;
+
+function AudioBarsIndicator({ active }: { active: boolean }) {
+  const anims = React.useRef(
+    Array.from({ length: BAR_COUNT }, () => new Animated.Value(BAR_MIN_HEIGHT))
+  ).current;
+
+  React.useEffect(() => {
+    if (active) {
+      const loops = anims.map((anim, i) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
+              toValue: BAR_MAX_HEIGHT - (i % 2) * 6,
+              duration: BAR_DURATIONS[i],
+              useNativeDriver: false,
+            }),
+            Animated.timing(anim, {
+              toValue: BAR_MIN_HEIGHT + (i % 3) * 3,
+              duration: BAR_DURATIONS[i],
+              useNativeDriver: false,
+            }),
+          ])
+        )
+      );
+      loops.forEach((l) => l.start());
+      return () => loops.forEach((l) => l.stop());
+    } else {
+      anims.forEach((anim) =>
+        Animated.timing(anim, {
+          toValue: BAR_MIN_HEIGHT,
+          duration: 200,
+          useNativeDriver: false,
+        }).start()
+      );
+    }
+  }, [active, anims]);
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: BAR_MAX_HEIGHT + 4 }}>
+      {anims.map((anim, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            width: 5,
+            height: anim,
+            backgroundColor: GOLD,
+            borderRadius: 3,
+            opacity: active ? 1 : 0.3,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
 const PADDING_BOTTOM_EXTRA = 24;
 
 function formatMmSs(totalSeconds: number) {
@@ -950,8 +1010,17 @@ export default function CookModeScreen() {
       speechRecognitionModule?.stop();
       Speech.stop();
       scheduledNotificationIdRef.current = null;
+      void stopTickingSound();
     };
   }, [clearRecognitionRestartTimer, speechRecognitionModule]);
+
+  React.useEffect(() => {
+    if (timerStatus === 'running') {
+      void startTickingSound();
+    } else {
+      void stopTickingSound();
+    }
+  }, [timerStatus]);
 
   React.useEffect(() => {
     if (timerStatus !== 'running') {
@@ -1657,6 +1726,7 @@ export default function CookModeScreen() {
                 <Text style={styles.stopReadingBtnTitle}>{ui.stopReadingNow}</Text>
                 <Text style={styles.stopReadingBtnHint}>{ui.stopReadingVoiceHint}</Text>
               </View>
+              <AudioBarsIndicator active={stepReadingAloud && !audioPaused} />
             </TouchableOpacity>
           ) : null}
 

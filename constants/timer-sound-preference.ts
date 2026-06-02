@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type BuiltinTimerSoundId = 'classic' | 'soft' | 'bright';
+export type BuiltinTimerSoundId = 'classic' | 'soft' | 'bright' | 'alarm';
 
 export type TimerSoundPreference = {
   kind: 'builtin' | 'custom';
@@ -11,7 +11,7 @@ export type TimerSoundPreference = {
 
 export const DEFAULT_TIMER_SOUND_PREFERENCE: TimerSoundPreference = {
   kind: 'builtin',
-  builtin: 'classic',
+  builtin: 'alarm',
   customUri: null,
   customName: null,
 };
@@ -25,7 +25,7 @@ function coerceParsed(raw: unknown): TimerSoundPreference | null {
   const o = raw as Record<string, unknown>;
   if (o.kind === 'builtin') {
     const b = o.builtin;
-    if (b === 'classic' || b === 'soft' || b === 'bright') {
+    if (b === 'classic' || b === 'soft' || b === 'bright' || b === 'alarm') {
       return { kind: 'builtin', builtin: b, customUri: null, customName: null };
     }
     return null;

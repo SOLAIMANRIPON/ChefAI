@@ -7,7 +7,40 @@ const BUILTIN_MODULES: Record<BuiltinTimerSoundId, number> = {
   classic: require('@/assets/sounds/timer-done.wav'),
   soft: require('@/assets/sounds/timer-soft.wav'),
   bright: require('@/assets/sounds/timer-bright.wav'),
+  alarm: require('@/assets/sounds/timer-alarm.mp3'),
 };
+
+const TICK_MODULE = require('@/assets/sounds/timer-tick.mp3');
+
+let tickSound: Audio.Sound | null = null;
+
+export async function startTickingSound(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    await stopTickingSound();
+    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+    const { sound } = await Audio.Sound.createAsync(TICK_MODULE, {
+      shouldPlay: true,
+      isLooping: true,
+      volume: 0.5,
+    });
+    tickSound = sound;
+  } catch {
+    /* noop */
+  }
+}
+
+export async function stopTickingSound(): Promise<void> {
+  if (!tickSound) return;
+  try {
+    await tickSound.stopAsync();
+    await tickSound.unloadAsync();
+  } catch {
+    /* noop */
+  } finally {
+    tickSound = null;
+  }
+}
 
 function playWebBeep(frequencyHz: number, durationMs: number): void {
   try {
@@ -45,6 +78,8 @@ function webParamsForBuiltin(id: BuiltinTimerSoundId): [number, number] {
       return [520, 520];
     case 'bright':
       return [1400, 260];
+    case 'alarm':
+      return [880, 800];
     default:
       return [880, 380];
   }
