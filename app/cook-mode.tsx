@@ -30,12 +30,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const GOLD = '#d3b275';
 const TIMER_STICKY_MIN_HEIGHT = 56;
 
-const BAR_COUNT = 5;
-const BAR_DURATIONS = [420, 320, 500, 370, 450];
-const BAR_MIN_HEIGHT = 4;
-const BAR_MAX_HEIGHT = 22;
+const BAR_COUNT = 12;
+const BAR_DURATIONS = [380, 290, 460, 330, 410, 350, 480, 300, 440, 360, 400, 320];
+const BAR_MIN_HEIGHT = 6;
+const BAR_MAX_HEIGHT = 34;
 
-function AudioBarsIndicator({ active }: { active: boolean }) {
+/** Thin gold border box with many gold bars — shown while TTS reads a step. */
+function SpeakingVisualizerBox({ active, onPress, a11yLabel }: { active: boolean; onPress?: () => void; a11yLabel?: string }) {
   const anims = React.useRef(
     Array.from({ length: BAR_COUNT }, () => new Animated.Value(BAR_MIN_HEIGHT))
   ).current;
@@ -46,13 +47,13 @@ function AudioBarsIndicator({ active }: { active: boolean }) {
         Animated.loop(
           Animated.sequence([
             Animated.timing(anim, {
-              toValue: BAR_MAX_HEIGHT - (i % 2) * 6,
-              duration: BAR_DURATIONS[i],
+              toValue: BAR_MAX_HEIGHT - (i % 3) * 8,
+              duration: BAR_DURATIONS[i % BAR_DURATIONS.length],
               useNativeDriver: false,
             }),
             Animated.timing(anim, {
-              toValue: BAR_MIN_HEIGHT + (i % 3) * 3,
-              duration: BAR_DURATIONS[i],
+              toValue: BAR_MIN_HEIGHT + (i % 4) * 2,
+              duration: BAR_DURATIONS[i % BAR_DURATIONS.length],
               useNativeDriver: false,
             }),
           ])
@@ -60,34 +61,69 @@ function AudioBarsIndicator({ active }: { active: boolean }) {
       );
       loops.forEach((l) => l.start());
       return () => loops.forEach((l) => l.stop());
-    } else {
-      anims.forEach((anim) =>
-        Animated.timing(anim, {
-          toValue: BAR_MIN_HEIGHT,
-          duration: 200,
-          useNativeDriver: false,
-        }).start()
-      );
     }
+    anims.forEach((anim) =>
+      Animated.timing(anim, {
+        toValue: BAR_MIN_HEIGHT,
+        duration: 200,
+        useNativeDriver: false,
+      }).start()
+    );
   }, [active, anims]);
 
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: BAR_MAX_HEIGHT + 4 }}>
+  const inner = (
+    <View style={speakingVisualizerStyles.inner}>
       {anims.map((anim, i) => (
         <Animated.View
           key={i}
           style={{
-            width: 5,
+            width: 4,
             height: anim,
             backgroundColor: GOLD,
-            borderRadius: 3,
-            opacity: active ? 1 : 0.3,
+            borderRadius: 2,
+            opacity: active ? 0.95 : 0.2,
           }}
         />
       ))}
     </View>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        style={speakingVisualizerStyles.box}
+        onPress={onPress}
+        activeOpacity={0.9}
+        accessibilityRole="button"
+        accessibilityLabel={a11yLabel}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={speakingVisualizerStyles.box}>{inner}</View>;
 }
+
+const speakingVisualizerStyles = StyleSheet.create({
+  box: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: GOLD,
+    borderRadius: 12,
+    backgroundColor: '#0a0a0a',
+    marginBottom: 14,
+    overflow: 'hidden',
+  },
+  inner: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 5,
+    minHeight: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+});
 const PADDING_BOTTOM_EXTRA = 24;
 
 function formatMmSs(totalSeconds: number) {
@@ -1715,19 +1751,11 @@ export default function CookModeScreen() {
           </View>
 
           {stepReadingAloud && !audioPaused ? (
-            <TouchableOpacity
-              style={styles.stopReadingBtn}
+            <SpeakingVisualizerBox
+              active
               onPress={() => interruptStepReading()}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel={ui.stopReadingNow}>
-              <MaterialIcons name="pause-circle-filled" size={28} color="#000" />
-              <View style={styles.stopReadingBtnTextWrap}>
-                <Text style={styles.stopReadingBtnTitle}>{ui.stopReadingNow}</Text>
-                <Text style={styles.stopReadingBtnHint}>{ui.stopReadingVoiceHint}</Text>
-              </View>
-              <AudioBarsIndicator active={stepReadingAloud && !audioPaused} />
-            </TouchableOpacity>
+              a11yLabel={ui.stopReadingNow}
+            />
           ) : null}
 
           <View style={styles.navRow}>
@@ -1951,19 +1979,6 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
     marginBottom: 14,
   },
-  stopReadingBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: GOLD,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 14,
-  },
-  stopReadingBtnTextWrap: { flex: 1 },
-  stopReadingBtnTitle: { color: '#000', fontSize: 16, fontWeight: '800' },
-  stopReadingBtnHint: { color: '#333', fontSize: 11, marginTop: 2, lineHeight: 15 },
   stepBody: { color: '#e8e8e8', fontSize: 17, lineHeight: 26 },
   navRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   secondaryBtn: {
