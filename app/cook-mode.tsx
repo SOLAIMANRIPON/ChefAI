@@ -30,10 +30,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const GOLD = '#d3b275';
 const TIMER_STICKY_MIN_HEIGHT = 56;
 
-const BAR_COUNT = 12;
+const BAR_COUNT = 16;
 const BAR_DURATIONS = [380, 290, 460, 330, 410, 350, 480, 300, 440, 360, 400, 320];
 const BAR_MIN_HEIGHT = 6;
-const BAR_MAX_HEIGHT = 34;
+const BAR_MAX_HEIGHT = 32;
+/** Fixed — bar animation must not resize the box or push content below. */
+const VISUALIZER_TRACK_HEIGHT = 36;
 
 /** Thin gold border box with many gold bars — shown while TTS reads a step. */
 function SpeakingVisualizerBox({ active, onPress, a11yLabel }: { active: boolean; onPress?: () => void; a11yLabel?: string }) {
@@ -74,16 +76,18 @@ function SpeakingVisualizerBox({ active, onPress, a11yLabel }: { active: boolean
   const inner = (
     <View style={speakingVisualizerStyles.inner}>
       {anims.map((anim, i) => (
-        <Animated.View
-          key={i}
-          style={{
-            width: 4,
-            height: anim,
-            backgroundColor: GOLD,
-            borderRadius: 2,
-            opacity: active ? 0.95 : 0.2,
-          }}
-        />
+        <View key={i} style={speakingVisualizerStyles.barSlot}>
+          <Animated.View
+            style={{
+              width: '72%',
+              maxWidth: 6,
+              height: anim,
+              backgroundColor: GOLD,
+              borderRadius: 2,
+              opacity: active ? 0.95 : 0.2,
+            }}
+          />
+        </View>
       ))}
     </View>
   );
@@ -107,6 +111,7 @@ function SpeakingVisualizerBox({ active, onPress, a11yLabel }: { active: boolean
 const speakingVisualizerStyles = StyleSheet.create({
   box: {
     width: '100%',
+    height: VISUALIZER_TRACK_HEIGHT + 24,
     borderWidth: 1,
     borderColor: GOLD,
     borderRadius: 12,
@@ -115,13 +120,20 @@ const speakingVisualizerStyles = StyleSheet.create({
     overflow: 'hidden',
   },
   inner: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: 5,
-    minHeight: 52,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    justifyContent: 'space-between',
+    height: VISUALIZER_TRACK_HEIGHT,
+    marginHorizontal: 10,
+    marginVertical: 12,
+  },
+  barSlot: {
+    flex: 1,
+    height: VISUALIZER_TRACK_HEIGHT,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
 });
 const PADDING_BOTTOM_EXTRA = 24;
