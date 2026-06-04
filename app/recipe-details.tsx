@@ -2,6 +2,7 @@ import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import { getSaveRecipeAlerts } from '@/constants/save-recipe-alerts';
+import { appendPlayStoreFooterToRecipeShare } from '@/constants/share-recipe-footer';
 import {
   normalizeDifficultyLevel,
   normalizeDietPreference,
@@ -189,7 +190,7 @@ export default function RecipeDetailsScreen() {
         : recipe.trim();
     const maxBody = 12000;
     const clipped = body.length > maxBody ? `${body.slice(0, maxBody)}\n…` : body;
-    const message = `${title}\n${metaLine}\n\n${clipped}\n\n— ChefAI`;
+    const message = appendPlayStoreFooterToRecipeShare(`${title}\n${metaLine}\n\n${clipped}\n\n— ChefAI`);
     const payload: { title: string; message: string; url?: string } = { title, message };
     const webImage = persistableHttpImageUrl(imageUrl);
     if (Platform.OS === 'ios' && webImage) {
