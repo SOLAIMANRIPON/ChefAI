@@ -1,5 +1,6 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HOME_EXPLORE_NAV_RESERVED_BOTTOM, HomeExploreNav } from '@/components/home-explore-nav';
+import { APP_ERRORS } from '@/constants/app-errors';
 import { resolveUiLanguageKey } from '@/constants/language-alias';
 import { clearCookModeSession, loadCookModeSession } from '@/constants/cook-mode-session';
 import {
@@ -1397,32 +1398,58 @@ export default function CookModeScreen() {
     });
   }, [speakCurrentStep]);
 
-  const toggleHandsFreeListening = React.useCallback(() => {
-    if (!speechRecognitionModule) {
-      setVoiceStatusText(ui.voiceUnavailable);
-      return;
+  const startHandsFreeListening = React.useCallback(async (): Promise<boolean> => {
+    const mod = speechRecognitionModule;
+    if (!mod) {
+      setVoiceStatusText(APP_ERRORS.voiceUnavailable);
+      return false;
     }
-    setHandsFreeEnabled((prev) => {
-      if (prev) {
-        isTtsSpeakingRef.current = false;
-        clearRecognitionRestartTimer();
-        clearPartialCommandDebounce();
-        speechRecognitionModule.stop();
-        Speech.stop();
-        setVoiceStatusText(ui.voiceOff);
+    try {
+      const permission = await mod.requestPermissionsAsync();
+      if (!permission.granted) {
+        setVoiceStatusText(APP_ERRORS.micPermissionOff);
+        Alert.alert(APP_ERRORS.micPermissionNeededTitle, APP_ERRORS.micPermissionNeededBody, [
+          { text: 'OK' },
+        ]);
         return false;
       }
       isTtsSpeakingRef.current = false;
-      setVoiceStatusText(ui.voiceListening);
-      speechRecognitionModule.start(cookModeSpeechRecognitionOptions);
+      setHandsFreeEnabled(true);
+      setVoiceStatusText(isTtsSpeakingRef.current ? ui.voiceReadingStep : ui.voiceListening);
+      mod.start(cookModeSpeechRecognitionOptions);
       return true;
-    });
+    } catch {
+      setVoiceStatusText(APP_ERRORS.voiceNeedsDevBuild);
+      return false;
+    }
   }, [
-    clearPartialCommandDebounce,
-    clearRecognitionRestartTimer,
     cookModeSpeechRecognitionOptions,
     speechRecognitionModule,
     ui.voiceListening,
+    ui.voiceReadingStep,
+  ]);
+
+  const toggleHandsFreeListening = React.useCallback(() => {
+    if (!speechRecognitionModule) {
+      setVoiceStatusText(APP_ERRORS.voiceUnavailable);
+      return;
+    }
+    if (handsFreeEnabledRef.current) {
+      isTtsSpeakingRef.current = false;
+      clearRecognitionRestartTimer();
+      clearPartialCommandDebounce();
+      speechRecognitionModule.stop();
+      Speech.stop();
+      setHandsFreeEnabled(false);
+      setVoiceStatusText(ui.voiceOff);
+      return;
+    }
+    void startHandsFreeListening();
+  }, [
+    clearPartialCommandDebounce,
+    clearRecognitionRestartTimer,
+    speechRecognitionModule,
+    startHandsFreeListening,
     ui.voiceOff,
   ]);
 
@@ -1474,7 +1501,7 @@ export default function CookModeScreen() {
             startTimerSeconds(mins * 60, truncateLabel(currentStepText));
             setVoiceStatusText(`${ui.timerStarted}: ${mins} ${ui.minutes.toLowerCase()}`);
           } else {
-            setVoiceStatusText(ui.noStepTimeStatus);
+            setVoiceStatusText(APP_ERRORS.noStepTimeStatus);
           }
           break;
         }
@@ -1653,43 +1680,31 @@ export default function CookModeScreen() {
       .then((mod) => {
         if (cancelled) return;
         setSpeechRecognitionModule(mod);
-        if (!mod) setVoiceStatusText(ui.voiceUnavailable);
+        if (!mod) setVoiceStatusText(APP_ERRORS.voiceUnavailable);
       })
       .catch(() => {
         if (!cancelled) {
           setSpeechRecognitionModule(null);
-          setVoiceStatusText(ui.voiceNeedsDevBuild);
+          setVoiceStatusText(APP_ERRORS.voiceNeedsDevBuild);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [ui.voiceNeedsDevBuild, ui.voiceUnavailable]);
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
-    const setupHandsFree = async () => {
-      const mod = speechRecognitionModule;
-      if (!mod) return;
-      try {
-        const permission = await mod.requestPermissionsAsync();
-        if (!permission.granted) {
-          setVoiceStatusText(ui.micPermissionOff);
-          return;
-        }
-        if (cancelled) return;
-        setHandsFreeEnabled(true);
-        if (!isTtsSpeakingRef.current) setVoiceStatusText(ui.voiceListening);
-        mod.start(cookModeSpeechRecognitionOptions);
-      } catch {
-        setVoiceStatusText(ui.voiceNeedsDevBuild);
+    if (!speechRecognitionModule) return;
+    void startHandsFreeListening().then((started) => {
+      if (!started && !cancelled && !handsFreeEnabledRef.current) {
+        setVoiceStatusText(APP_ERRORS.micPermissionOff);
       }
-    };
-    void setupHandsFree();
+    });
     return () => {
       cancelled = true;
     };
-  }, [cookModeSpeechRecognitionOptions, speechRecognitionModule, ui]);
+  }, [speechRecognitionModule, startHandsFreeListening]);
 
   if (loading) {
     return (
@@ -1767,10 +1782,8 @@ export default function CookModeScreen() {
             <View style={styles.bnVoiceBanner}>
               <MaterialIcons name="record-voice-over" size={18} color={GOLD} />
               <View style={styles.bnVoiceBannerBody}>
-                <Text style={styles.bnVoiceBannerTitle}>{ui.bnVoiceMissingTitle}</Text>
-                <Text style={styles.bnVoiceBannerText}>
-                  {ui.bnVoiceMissingBody}
-                </Text>
+                <Text style={styles.bnVoiceBannerTitle}>{APP_ERRORS.bnVoiceMissingTitle}</Text>
+                <Text style={styles.bnVoiceBannerText}>{APP_ERRORS.bnVoiceMissingBody}</Text>
               </View>
             </View>
           ) : null}

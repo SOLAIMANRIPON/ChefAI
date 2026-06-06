@@ -1,3 +1,4 @@
+import { APP_ERRORS } from '@/constants/app-errors';
 import { resolveUiLanguageKey } from '@/constants/language-alias';
 
 export type SaveRecipeAlertBundle = {
@@ -49,7 +50,12 @@ const hindiBundle: SaveRecipeAlertBundle = {
  */
 export function getSaveRecipeAlerts(selectedLangFromParams: string): SaveRecipeAlertBundle {
   const resolved = resolveUiLanguageKey(selectedLangFromParams);
-  if (resolved === 'বাংলা') return bundles.বাংলা;
-  if (resolved === 'Hindi') return hindiBundle;
-  return bundles.English;
+  const base =
+    resolved === 'বাংলা' ? bundles.বাংলা : resolved === 'Hindi' ? hindiBundle : bundles.English;
+  return {
+    ...base,
+    failedTitle: APP_ERRORS.saveFailedTitle,
+    failedBody: APP_ERRORS.saveFailedBody,
+    coverCopyFailedBody: APP_ERRORS.saveCoverCopyFailed,
+  };
 }

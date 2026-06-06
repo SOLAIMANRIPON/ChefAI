@@ -46,6 +46,17 @@ export default function SettingsHubScreen() {
             <Text style={styles.menuDesc}>How to use ChefAI, FAQ, and tips — ChefAI only.</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.menuCard}
+            onPress={() => router.push('/settings/contact')}
+            activeOpacity={0.85}
+            accessibilityRole="button">
+            <Text style={styles.menuTitle}>Contact us</Text>
+            <Text style={styles.menuDesc}>
+              Email suggestions, issues, or questions — we reply within 2–3 business days.
+            </Text>
+          </TouchableOpacity>
+
           <DesignerCreditLine />
         </ScrollView>
       </View>

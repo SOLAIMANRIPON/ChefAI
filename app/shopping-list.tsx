@@ -1,6 +1,7 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { resolveUiLanguageKey } from '@/constants/language-alias';
+import { APP_ERRORS } from '@/constants/app-errors';
 import {
   mergeShoppingItemsToIngredientNames,
   normalizeShoppingIngredientLabels,
@@ -120,15 +121,13 @@ const SHOPPING_UI_TEXT: Record<string, ShoppingUi> = {
       'সার্ভার লিস্ট unavailable — রেসিপি টেক্সট থেকে স্বয়ংক্রিয় সংক্ষিপ্ত লিস্ট। নতুন সার্ভার ডিপ্লয় করলে আরও নির্ভুল হবে।',
     generating: 'উপকরণের লিস্ট তৈরি হচ্ছে…',
     loading: 'লোড হচ্ছে…',
-    errorNoRecipeId: 'রেসিপি আইডি নেই।',
-    errorRecipeNotFound: 'রেসিপি পাওয়া যায়নি। আগে সেভ করা রেসিপি বেছে নিন।',
-    errorEmptyRecipe: 'রেসিপি টেক্সট খালি—শপিং লিস্ট বানানো যাবে না।',
-    errorLoadFailed: 'লোড করা যায়নি।',
-    errorNoRecipeText: 'রেসিপি টেক্সট নেই।',
-    errorListBuildServer:
-      'লিস্ট তৈরি করা গেল না। সার্ভার আপডেট করুন অথবা রেসিপিতে উপকরণ/পরিমাণ স্পষ্ট থাকা প্রয়োজন।',
-    errorListBuildNoApiBase:
-      'লিস্ট তৈরি করা গেল না। EXPO_PUBLIC_API_BASE_URL সেট করুন অথবা রেসিপি টেক্সট পর্যাপ্ত নয়।',
+    errorNoRecipeId: APP_ERRORS.recipeIdMissing,
+    errorRecipeNotFound: APP_ERRORS.recipeNotFound,
+    errorEmptyRecipe: APP_ERRORS.recipeEmpty,
+    errorLoadFailed: APP_ERRORS.loadFailed,
+    errorNoRecipeText: APP_ERRORS.noRecipeText,
+    errorListBuildServer: APP_ERRORS.shoppingListBuildServer,
+    errorListBuildNoApiBase: APP_ERRORS.shoppingListBuildNoApiBase,
     emptyItems: 'কোনো আইটেম নেই।',
   },
   English: EN_SHOPPING_UI,
@@ -191,10 +190,6 @@ export default function ShoppingListScreen() {
     setGenerating(true);
     setError('');
     setFallbackNote(false);
-    // Resolve UI strings from the recipe's language so error toasts in this
-    // callback match the recipe context (the `ui` from React state may lag if
-    // generateAndStore is invoked before the language state has settled).
-    const callbackUi = resolveShoppingUi(lang);
     try {
       const apiLabels = await fetchShoppingItemsFromApi(body, name, lang, servings, ingredientsArr);
       const localLabels = ingredientsArr && ingredientsArr.length > 0
@@ -205,7 +200,7 @@ export default function ShoppingListScreen() {
       setFallbackNote(apiLabels.length === 0 && localLabels.length > 0);
       if (!labels.length) {
         setError(
-          API_BASE_URL ? callbackUi.errorListBuildServer : callbackUi.errorListBuildNoApiBase
+          API_BASE_URL ? APP_ERRORS.shoppingListBuildServer : APP_ERRORS.shoppingListBuildNoApiBase
         );
         return;
       }
@@ -221,7 +216,7 @@ export default function ShoppingListScreen() {
   React.useEffect(() => {
     if (!recipeId) {
       setLoadingRecipe(false);
-      setError(EN_SHOPPING_UI.errorNoRecipeId);
+      setError(APP_ERRORS.recipeIdMissing);
       return;
     }
 
@@ -234,12 +229,11 @@ export default function ShoppingListScreen() {
         if (cancelled) return;
         if (!recipe) {
           // No recipe loaded yet, so use English (we don't know the recipe's language).
-          setError(EN_SHOPPING_UI.errorRecipeNotFound);
+          setError(APP_ERRORS.recipeNotFound);
           setLoadingRecipe(false);
           return;
         }
         const recipeLang = recipe.language || 'English';
-        const recipeUi = resolveShoppingUi(recipeLang);
         const name = recipe.dishName || 'Recipe';
         const ingredientsArr = recipe.ingredientsList ?? [];
         setDishName(name);
@@ -257,7 +251,7 @@ export default function ShoppingListScreen() {
         }
 
         if (!recipe.recipe.trim() && !ingredientsArr.length) {
-          setError(recipeUi.errorEmptyRecipe);
+          setError(APP_ERRORS.recipeEmpty);
           setLoadingRecipe(false);
           return;
         }
@@ -272,7 +266,7 @@ export default function ShoppingListScreen() {
           ingredientsArr.length ? ingredientsArr : undefined
         );
       } catch {
-        if (!cancelled) setError(EN_SHOPPING_UI.errorLoadFailed);
+        if (!cancelled) setError(APP_ERRORS.loadFailed);
         if (!cancelled) setLoadingRecipe(false);
       }
     })();
@@ -291,7 +285,7 @@ export default function ShoppingListScreen() {
 
   const onRegenerate = () => {
     if (!recipeId || (!recipeBody.trim() && structuredIngredients.length === 0)) {
-      setError(ui.errorNoRecipeText);
+      setError(APP_ERRORS.noRecipeText);
       return;
     }
     void generateAndStore(

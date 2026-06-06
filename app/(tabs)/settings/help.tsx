@@ -225,6 +225,15 @@ export default function SettingsHelpScreen() {
             ))
           )}
 
+          <TouchableOpacity
+            style={styles.contactFooterWrap}
+            onPress={() => router.push('/settings/contact')}
+            activeOpacity={0.85}
+            accessibilityRole="link"
+            accessibilityLabel={bundle.stillStuckContact}>
+            <Text style={styles.contactFooter}>{bundle.stillStuckContact}</Text>
+          </TouchableOpacity>
+
           <DesignerCreditLine />
         </ScrollView>
       </View>
@@ -291,4 +300,6 @@ const styles = StyleSheet.create({
   cardTitle: { color: '#eee', fontSize: 15, fontWeight: '700' },
   cardBody: { color: '#bbb', fontSize: 13, lineHeight: 20, marginTop: 10 },
   empty: { color: '#888', fontSize: 13, marginTop: 8 },
+  contactFooterWrap: { marginTop: 28, alignSelf: 'stretch' },
+  contactFooter: { color: '#9fd4ff', fontSize: 14, lineHeight: 21, fontWeight: '600', textAlign: 'center' },
 });

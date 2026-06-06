@@ -1,5 +1,6 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
+import { APP_ERRORS, userFacingError } from '@/constants/app-errors';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import { getSaveRecipeAlerts } from '@/constants/save-recipe-alerts';
 import { appendPlayStoreFooterToRecipeShare } from '@/constants/share-recipe-footer';
@@ -437,7 +438,7 @@ export default function RecipeDetailsScreen() {
   const fetchRecipeDetailsFromBackend = useCallback(
     async (deviceInstallId: string, includeImage: boolean) => {
     if (!API_BASE_URL) {
-      throw new Error('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
+      throw new Error(APP_ERRORS.apiBaseUrlMissing);
     }
 
     let response: Response;
@@ -581,11 +582,7 @@ export default function RecipeDetailsScreen() {
         };
       } catch (error) {
         console.error(error);
-        if (error instanceof Error) {
-          setErrorMessage(error.message);
-        } else {
-          setErrorMessage('রেসিপি লোড করা যায়নি। দয়া করে আবার চেষ্টা করুন।');
-        }
+        setErrorMessage(userFacingError(error, APP_ERRORS.recipeLoadFailed));
         setAwaitingPlanChoice(true);
       } finally {
         setLoading(false);
@@ -651,7 +648,7 @@ export default function RecipeDetailsScreen() {
         }
 
         if (!API_BASE_URL) {
-          throw new Error('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
+          throw new Error(APP_ERRORS.apiBaseUrlMissing);
         }
 
         const id = await getOrCreateChefAiInstallId();
@@ -661,11 +658,7 @@ export default function RecipeDetailsScreen() {
         setAwaitingPlanChoice(true);
       } catch (error) {
         console.error(error);
-        if (error instanceof Error) {
-          setErrorMessage(error.message);
-        } else {
-          setErrorMessage('রেসিপি লোড করা যায়নি। দয়া করে আবার চেষ্টা করুন।');
-        }
+        setErrorMessage(userFacingError(error, APP_ERRORS.recipeLoadFailed));
       } finally {
         setLoading(false);
       }
@@ -908,7 +901,7 @@ export default function RecipeDetailsScreen() {
             ) : null}
             {imageUrl && imageError ? (
               <View style={[styles.dishImage, styles.imageFallback]}>
-                <Text style={styles.imageFallbackText}>ছবি লোড হচ্ছে না</Text>
+                <Text style={styles.imageFallbackText}>{APP_ERRORS.imageLoadFailed}</Text>
               </View>
             ) : null}
             {dishName ? <Text style={styles.dishTitle}>{dishName}</Text> : null}

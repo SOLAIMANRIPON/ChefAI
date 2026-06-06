@@ -14,7 +14,7 @@ const EN_TOPICS: HelpTopic[] = [
     id: 'recipe',
     title: 'Recipe details',
     body:
-      '• Cook mode: step-by-step with voice commands, timers, and optional alarm sounds (Settings → Timer alarm).\n' +
+      '• Cook mode: step-by-step with voice commands (needs Microphone permission on Android), timers, and optional alarm sounds (Settings → Timer alarm).\n' +
       '• Save recipe: stores on this device for offline access from Explore.\n' +
       '• Share: sends recipe text (with a Google Play link at the end) and, when possible, the dish photo. Some apps (e.g. Messenger) may only attach the photo—paste from clipboard if we copied the text there.\n' +
       '• Save photo to gallery: exports the dish image when you tap that action on Recipe details.\n' +
@@ -90,6 +90,30 @@ const EN_FAQ: HelpFaq[] = [
     keywords: ['timer', 'alarm', 'sound', 'cook', 'audio'],
   },
   {
+    id: 'cook_voice',
+    q: 'Cook Mode voice not working / no Microphone in Settings',
+    a:
+      'Cook Mode uses the microphone only for hands-free commands—not for recording or uploading audio.\n\n' +
+      '1. In Cook Mode, tap the gold mic icon (not mic-off). Status should say “Listening for commands”.\n' +
+      '2. Android Settings → Apps → ChefAI → Permissions → Microphone → Allow.\n' +
+      '3. If Microphone is missing from that list, update ChefAI from Google Play (older versions may not declare mic access), reopen the app, open Cook Mode once, then check Permissions again.\n' +
+      '4. English recipes: try “next”, “previous”, “mark this step done”, “pause audio”. Wait until the step stops reading, or pause audio first.\n' +
+      '5. Still stuck? Force-stop ChefAI (Settings → Apps), reopen, and allow Microphone when prompted.',
+    keywords: [
+      'voice',
+      'mic',
+      'microphone',
+      'cook',
+      'command',
+      'permission',
+      'hands-free',
+      'listening',
+      'speech',
+      'settings',
+      'allow',
+    ],
+  },
+  {
     id: 'language',
     q: 'Why is Explore in English but my recipe is Bangla?',
     a: 'Hub and list screens stay in English; recipe content follows the language you chose when you generated that recipe.',
@@ -116,8 +140,8 @@ const EN_FAQ: HelpFaq[] = [
   {
     id: 'help_search',
     q: 'What can I type in Help search?',
-    a: 'Short words about the app: share, save, timer, credits, photo, update, language. Answers come only from this built-in guide—not from the internet.',
-    keywords: ['search', 'help', 'faq', 'question'],
+    a: 'Short words about the app: share, save, timer, voice, mic, credits, photo, update, language. Answers come only from this built-in guide—not from the internet.',
+    keywords: ['search', 'help', 'faq', 'question', 'voice', 'mic'],
   },
 ];
 
@@ -135,7 +159,7 @@ const BN_TOPICS: HelpTopic[] = [
     id: 'recipe',
     title: 'রেসিপি ডিটেইল',
     body:
-      '• কুক মোড: ধাপে ধাপে, ভয়েস কমান্ড, টাইমার; অ্যালার্ম শব্দ সেটিংস → টাইমার অ্যালার্ম।\n' +
+      '• কুক মোড: ধাপে ধাপে, ভয়েস কমান্ড (Android-এ Microphone permission), টাইমার; অ্যালার্ম সেটিংস → টাইমার অ্যালার্ম।\n' +
       '• সেভ: রেসিপি ফোনে সংরক্ষিত—এক্সপ্লোর থেকে খুলুন।\n' +
       '• শেয়ার: টেক্সট (শেষে Google Play লিংক) ও সম্ভব হলে ছবি। Messenger শুধু ছবি নিলে ক্লিপবোর্ড থেকে পেস্ট করুন।\n' +
       '• গ্যালারিতে ছবি সেভ: রেসিপি ডিটেইলে “Save photo to gallery”।\n' +
@@ -211,6 +235,29 @@ const BN_FAQ: HelpFaq[] = [
     keywords: ['টাইমার', 'timer', 'অ্যালার্ম', 'কুক'],
   },
   {
+    id: 'cook_voice',
+    q: 'কুক মোড ভয়েস কাজ করছে না / Settings-এ Microphone নেই',
+    a:
+      'কুক মোড শুধু হ্যান্ডস-ফ্রি কমান্ডের জন্য মাইক ব্যবহার করে—অডিও রেকর্ড বা আপলোড হয় না।\n\n' +
+      '১. কুক মোডে সোনালি mic আইকন চাপুন (mic-off নয়)। “Listening for commands” দেখা উচিত।\n' +
+      '২. Android Settings → Apps → ChefAI → Permissions → Microphone → Allow।\n' +
+      '৩. Microphone লিস্টে নেই? Google Play থেকে ChefAI আপডেট করুন, অ্যাপ খুলে কুক মোড একবার খুলুন, তারপর Permissions আবার দেখুন।\n' +
+      '৪. ইংরেজি রেসিপি: “next”, “previous”, “mark this step done”, “pause audio” বলুন। ধাপ পড়া শেষ হলে বা pause করার পর বলুন।\n' +
+      '৫. না হলে Settings → Apps থেকে ChefAI Force stop করে আবার খুলুন; prompt এলে Allow দিন।',
+    keywords: [
+      'voice',
+      'ভয়েস',
+      'mic',
+      'মাইক',
+      'microphone',
+      'কুক',
+      'cook',
+      'permission',
+      'কমান্ড',
+      'settings',
+    ],
+  },
+  {
     id: 'language',
     q: 'এক্সপ্লোর ইংরেজি, রেসিপি বাংলা কেন?',
     a: 'হাব/লিস্ট ইংরেজিতে; রেসিপির লেখা আপনি যে ভাষায় তৈরি করেছেন সেই অনুযায়ী।',
@@ -237,8 +284,8 @@ const BN_FAQ: HelpFaq[] = [
   {
     id: 'help_search',
     q: 'সার্চে কী লিখব?',
-    a: 'ছোট শব্দ: শেয়ার, সেভ, টাইমার, ক্রেডিট, ছবি, আপডেট, ভাষা। উত্তর শুধু এই গাইড থেকে—ইন্টারনেট নয়।',
-    keywords: ['সার্চ', 'search', 'হেল্প'],
+    a: 'ছোট শব্দ: শেয়ার, সেভ, টাইমার, ভয়েস, mic, ক্রেডিট, ছবি, আপডেট, ভাষা। উত্তর শুধু এই গাইড থেকে—ইন্টারনেট নয়।',
+    keywords: ['সার্চ', 'search', 'হেল্প', 'voice', 'mic'],
   },
 ];
 
@@ -256,7 +303,7 @@ const HI_TOPICS: HelpTopic[] = [
     id: 'recipe',
     title: 'रेसिपी विवरण',
     body:
-      '• कुक मोड: चरण-दर-चरण, वॉइस, टाइमर; अलार्म ध्वनि सेटिंग्स → टाइमर अलार्म।\n' +
+      '• कुक मोड: चरण-दर-चरण, वॉइस (Android पर Microphone अनुमति), टाइमर; अलार्म सेटिंग्स → टाइमर अलार्म।\n' +
       '• सेव: इस डिवाइस पर; एक्सप्लोर से खोलें।\n' +
       '• शेयर: टेक्स्ट (अंत में Google Play लिंक) और फोटो। Messenger केवल फोटो ले तो क्लिपबोर्ड से पेस्ट करें।\n' +
       '• गैलरी में फोटो सेव: रेसिपी विवरण पर “Save photo to gallery”।\n' +
@@ -332,6 +379,18 @@ const HI_FAQ: HelpFaq[] = [
     keywords: ['timer', 'alarm', 'cook'],
   },
   {
+    id: 'cook_voice',
+    q: 'कुक मोड वॉइस काम नहीं कर रहा / Settings में Microphone नहीं',
+    a:
+      'कुक मोड केवल हैंड्स-फ्री कमांड के लिए माइक्रोफ़ोन उपयोग करता है—रिकॉर्डिंग अपलोड नहीं होती।\n\n' +
+      '1. कुक मोड में सुनहरा mic आइकन टैप करें। “Listening for commands” दिखना चाहिए।\n' +
+      '2. Android Settings → Apps → ChefAI → Permissions → Microphone → Allow।\n' +
+      '3. Microphone सूची में नहीं? Google Play से ChefAI अपडेट करें, ऐप खोलकर कुक मोड एक बार खोलें, फिर Permissions देखें।\n' +
+      '4. अंग्रेज़ी रेसिपी: “next”, “previous”, “mark this step done”, “pause audio”।\n' +
+      '5. Settings → Apps से Force stop करके दोबारा खोलें; prompt पर Allow दें।',
+    keywords: ['voice', 'mic', 'microphone', 'cook', 'permission', 'command', 'settings'],
+  },
+  {
     id: 'language',
     q: 'एक्सप्लोर अंग्रेज़ी, रेसिपी हिंदी क्यों?',
     a: 'हब/लिस्ट अंग्रेज़ी में; रेसिपी आपकी चुनी भाषा में।',
@@ -358,8 +417,8 @@ const HI_FAQ: HelpFaq[] = [
   {
     id: 'help_search',
     q: 'सर्च में क्या लिखूँ?',
-    a: 'छोटे शब्द: share, save, timer, credits, photo, update। उत्तर केवल इस गाइड से।',
-    keywords: ['search', 'help', 'faq'],
+    a: 'छोटे शब्द: voice, mic, share, timer, credits, photo, update। उत्तर केवल इस गाइड से।',
+    keywords: ['search', 'help', 'faq', 'voice', 'mic'],
   },
 ];
 
@@ -377,7 +436,7 @@ const UR_TOPICS: HelpTopic[] = [
     id: 'recipe',
     title: 'رسپی کی تفصیل',
     body:
-      '• کک موڈ: قدم بہ قدم، آواز، ٹائمر؛ الارم آواز ترتیبات → ٹائمر الارم۔\n' +
+      '• کک موڈ: قدم بہ قدم، آواز (Android پر Microphone اجازت)، ٹائمر؛ الارم ترتیبات → ٹائمر الارم۔\n' +
       '• محفوظ: اس ڈیوائس پر؛ ایکسپلور سے کھولیں۔\n' +
       '• شیئر: متن (آخر میں Google Play لنک) اور تصویر۔ Messenger صرف تصویر لے تو کلپ بورڈ سے پیسٹ کریں۔\n' +
       '• گیلری میں تصویر: رسپی تفصیل پر “Save photo to gallery”۔\n' +
@@ -453,6 +512,18 @@ const UR_FAQ: HelpFaq[] = [
     keywords: ['timer', 'alarm', 'cook'],
   },
   {
+    id: 'cook_voice',
+    q: 'کک موڈ آواز کام نہیں کر رہی / Settings میں Microphone نہیں',
+    a:
+      'کک موڈ صرف ہینڈز-فری کمانڈز کے لیے مائیک استعمال کرتا ہے—آڈیو اپ لوڈ نہیں ہوتی۔\n\n' +
+      '1. کک موڈ میں سنہری mic آئیکن ٹیپ کریں۔ “Listening for commands” نظر آنا چاہیے۔\n' +
+      '2. Android Settings → Apps → ChefAI → Permissions → Microphone → Allow۔\n' +
+      '3. Microphone فہرست میں نہیں؟ Google Play سے ChefAI اپ ڈیٹ کریں، کک موڈ ایک بار کھولیں، پھر Permissions دیکھیں۔\n' +
+      '4. انگریزی رسپی: “next”, “previous”, “mark this step done”, “pause audio”۔\n' +
+      '5. Settings → Apps سے Force stop کر کے دوبارہ کھولیں؛ prompt پر Allow دیں۔',
+    keywords: ['voice', 'mic', 'microphone', 'cook', 'permission', 'command', 'settings'],
+  },
+  {
     id: 'language',
     q: 'ایکسپلور انگریزی، رسپی اردو کیوں؟',
     a: 'ہب/لسٹ انگریزی میں؛ رسپی آپ کی چنی زبان میں۔',
@@ -479,8 +550,8 @@ const UR_FAQ: HelpFaq[] = [
   {
     id: 'help_search',
     q: 'تلاش میں کیا لکھوں؟',
-    a: 'مختصر الفاظ: share, save, timer, credits, photo, update۔ جواب صرف اس گائیڈ سے۔',
-    keywords: ['search', 'help', 'faq'],
+    a: 'مختصر الفاظ: voice, mic, share, timer, credits, photo, update۔ جواب صرف اس گائیڈ سے۔',
+    keywords: ['search', 'help', 'faq', 'voice', 'mic'],
   },
 ];
 
@@ -494,10 +565,11 @@ export const HELP_BUNDLES: Record<HelpLangId, HelpBundle> = {
     onlyChefAiNotice:
       'ChefAI Help: explanations and FAQ match this app only. Nothing here is medical, legal, or financial advice.',
     noNetworkLegal: 'No data is sent from Help search to a server for answering.',
-    searchPlaceholder: 'Search topics & FAQ (e.g. share, timer, credits, photo)',
+    searchPlaceholder: 'Search topics & FAQ (e.g. voice, mic, share, timer, credits)',
     topicsHeading: 'Topics',
     faqHeading: 'Common questions',
-    noSearchResults: 'No matching topics or questions. Try shorter words like: share, save, timer, credits, photo.',
+    noSearchResults: 'No matching topics or questions. Try shorter words like: voice, mic, share, timer, credits.',
+    stillStuckContact: 'Still stuck? Contact us in Settings.',
     topics: EN_TOPICS,
     faqs: EN_FAQ,
   },
@@ -511,10 +583,11 @@ export const HELP_BUNDLES: Record<HelpLangId, HelpBundle> = {
     onlyChefAiNotice:
       'ChefAI সাহায্য: শুধু এই অ্যাপ। চিকিৎসা, আইনি বা আর্থিক পরামর্শ নয়।',
     noNetworkLegal: 'সার্চের জন্য সার্ভারে প্রশ্ন পাঠানো হয় না।',
-    searchPlaceholder: 'টপিক ও FAQ সার্চ (যেমন: শেয়ার, টাইমার, ক্রেডিট, ছবি)',
+    searchPlaceholder: 'টপিক ও FAQ সার্চ (যেমন: voice, mic, শেয়ার, টাইমার, ক্রেডিট)',
     topicsHeading: 'বিষয়সমূহ',
     faqHeading: 'প্রায়শই জিজ্ঞাসা',
-    noSearchResults: 'মিল পেল না। ছোট শব্দ চেষ্টা করুন: শেয়ার, সেভ, টাইমার, ক্রেডিট, ছবি।',
+    noSearchResults: 'মিল পেল না। ছোট শব্দ চেষ্টা করুন: voice, mic, শেয়ার, টাইমার, ক্রেডিট।',
+    stillStuckContact: 'এখনও সমাধান হয়নি? Settings থেকে Contact us-এ ইমেইল করুন।',
     topics: BN_TOPICS,
     faqs: BN_FAQ,
   },
@@ -532,6 +605,7 @@ export const HELP_BUNDLES: Record<HelpLangId, HelpBundle> = {
     topicsHeading: 'विषय',
     faqHeading: 'सामान्य प्रश्न',
     noSearchResults: 'कोई मेल नहीं। छोटे शब्द आज़माएँ: share, save, timer, credits, photo.',
+    stillStuckContact: 'अभी भी समस्या? Settings में Contact us पर ईमेल करें।',
     topics: HI_TOPICS,
     faqs: HI_FAQ,
   },
@@ -549,6 +623,7 @@ export const HELP_BUNDLES: Record<HelpLangId, HelpBundle> = {
     topicsHeading: 'عنوانات',
     faqHeading: 'عام سوالات',
     noSearchResults: 'کوئی میل نہیں۔ مختصر الفاظ آزمائیں: share, save, timer, photo.',
+    stillStuckContact: 'ابھی بھی مسئلہ؟ Settings میں Contact us سے ای میل کریں۔',
     topics: UR_TOPICS,
     faqs: UR_FAQ,
   },

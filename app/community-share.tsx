@@ -1,3 +1,4 @@
+import { APP_ERRORS } from '@/constants/app-errors';
 import { addUserPost } from '@/constants/community-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as ImagePicker from 'expo-image-picker';
@@ -32,7 +33,7 @@ export default function CommunityShareScreen() {
     if (Platform.OS === 'ios') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(t('community.alertPermissionTitle'), t('community.alertPermissionBody'));
+        Alert.alert(APP_ERRORS.communityPermissionTitle, APP_ERRORS.communityPermissionBody);
         return;
       }
     }
@@ -50,11 +51,11 @@ export default function CommunityShareScreen() {
   const onPublish = async () => {
     const title = dishTitle.trim();
     if (!title) {
-      Alert.alert(t('community.alertMissingTitle'), t('community.alertMissingBody'));
+      Alert.alert(APP_ERRORS.communityMissingTitle, APP_ERRORS.communityMissingBody);
       return;
     }
     if (!imageUri) {
-      Alert.alert(t('community.alertPhotoTitle'), t('community.alertPhotoBody'));
+      Alert.alert(APP_ERRORS.communityPhotoTitle, APP_ERRORS.communityPhotoBody);
       return;
     }
     setSaving(true);
@@ -73,7 +74,7 @@ export default function CommunityShareScreen() {
       });
       router.replace('/community');
     } catch {
-      Alert.alert(t('community.alertSaveFailTitle'), t('community.alertSaveFailBody'));
+      Alert.alert(APP_ERRORS.communitySaveFailTitle, APP_ERRORS.communitySaveFailBody);
     } finally {
       setSaving(false);
     }

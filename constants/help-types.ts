@@ -17,6 +17,8 @@ export type HelpBundle = {
   topicsHeading: string;
   faqHeading: string;
   noSearchResults: string;
+  /** Footer below FAQ — taps through to Settings → Contact us. */
+  stillStuckContact: string;
   topics: HelpTopic[];
   faqs: HelpFaq[];
 };

@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DesignerCreditLine } from '@/components/designer-footer';
+import { APP_ERRORS, userFacingError } from '@/constants/app-errors';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import {
   type DietConflictReason,
@@ -64,6 +65,9 @@ function cleanIngredientInput(raw: string): string {
     .trim();
 }
 
+const EN_VOICE_BUTTON = 'Use keyboard mic';
+const EN_VOICE_HINT = 'Open the keyboard and tap the mic icon to speak.';
+
 const uiTranslations: Record<
   string,
   {
@@ -71,6 +75,8 @@ const uiTranslations: Record<
     modeSectionLabel: string;
     strictModeLabel: string;
     creativeModeLabel: string;
+    voiceButtonLabel: string;
+    voiceFallbackHint: string;
   }
 > = {
   বাংলা: {
@@ -78,84 +84,112 @@ const uiTranslations: Record<
     modeSectionLabel: 'রেসিপি মোড',
     strictModeLabel: 'নির্ভুল',
     creativeModeLabel: 'সৃজনশীল',
+    voiceButtonLabel: 'কিবোর্ড মাইক ব্যবহার করুন',
+    voiceFallbackHint: 'Keyboard খুলে mic আইকনে ট্যাপ করে কথা বলুন।',
   },
   English: {
     ingredientPlaceholder: 'Enter an ingredient or a dish name...',
     modeSectionLabel: 'Recipe mode',
     strictModeLabel: 'Strict',
     creativeModeLabel: 'Creative',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Hindi: {
     ingredientPlaceholder: 'सामग्री या डिश का नाम लिखें...',
     modeSectionLabel: 'रेसिपी मोड',
     strictModeLabel: 'सटीक',
     creativeModeLabel: 'रचनात्मक',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Arabic: {
     ingredientPlaceholder: 'اكتب اسم المكون او اسم الطبق...',
     modeSectionLabel: 'وضع الوصفة',
     strictModeLabel: 'دقيق',
     creativeModeLabel: 'إبداعي',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   French: {
     ingredientPlaceholder: 'Entrez le nom d\'un ingredient ou d\'un plat...',
     modeSectionLabel: 'Mode recette',
     strictModeLabel: 'Precis',
     creativeModeLabel: 'Creatif',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Spanish: {
     ingredientPlaceholder: 'Escribe el nombre del ingrediente o del plato...',
     modeSectionLabel: 'Modo receta',
     strictModeLabel: 'Estricto',
     creativeModeLabel: 'Creativo',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Urdu: {
     ingredientPlaceholder: 'اجزاء کا نام یا کھانے کا نام لکھیں...',
     modeSectionLabel: 'ریسیپی موڈ',
     strictModeLabel: 'درست',
     creativeModeLabel: 'تخلیقی',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Japanese: {
     ingredientPlaceholder: '材料名または料理名を入力してください...',
     modeSectionLabel: 'レシピモード',
     strictModeLabel: '厳密',
     creativeModeLabel: 'クリエイティブ',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Chinese: {
     ingredientPlaceholder: '请输入食材名称或菜名...',
     modeSectionLabel: '食谱模式',
     strictModeLabel: '严谨',
     creativeModeLabel: '创意',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Korean: {
     ingredientPlaceholder: '재료 이름 또는 음식 이름을 입력하세요...',
     modeSectionLabel: '레시피 모드',
     strictModeLabel: '정확',
     creativeModeLabel: '창의',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Turkish: {
     ingredientPlaceholder: 'Malzeme veya yemek adini yazin...',
     modeSectionLabel: 'Tarif modu',
     strictModeLabel: 'Kesin',
     creativeModeLabel: 'Yaratici',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Persian: {
     ingredientPlaceholder: 'نام ماده يا نام غذا را وارد کنيد...',
     modeSectionLabel: 'حالت دستور',
     strictModeLabel: 'دقیق',
     creativeModeLabel: 'خلاقانه',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Portuguese: {
     ingredientPlaceholder: 'Digite o nome do ingrediente ou do prato...',
     modeSectionLabel: 'Modo receita',
     strictModeLabel: 'Rigoroso',
     creativeModeLabel: 'Criativo',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
   Greek: {
     ingredientPlaceholder: 'Γραψτε ονομα υλικου ή φαγητου...',
     modeSectionLabel: 'Λειτουργια συνταγης',
     strictModeLabel: 'Ακριβης',
     creativeModeLabel: 'Δημιουργικο',
+    voiceButtonLabel: EN_VOICE_BUTTON,
+    voiceFallbackHint: EN_VOICE_HINT,
   },
 };
 
@@ -239,21 +273,18 @@ const dietConflictUi = {
   },
 } as const;
 
-function dietConflictMessage(
-  reason: DietConflictReason,
-  ui: (typeof dietConflictUi)[keyof typeof dietConflictUi]
-): string {
+function dietConflictMessageEn(reason: DietConflictReason): string {
   switch (reason) {
     case 'vegetarian_flesh':
-      return ui.msgVegetarian;
+      return APP_ERRORS.dietConflictVegetarian;
     case 'vegan_flesh':
-      return ui.msgVeganFlesh;
+      return APP_ERRORS.dietConflictVeganFlesh;
     case 'vegan_animal_product':
-      return ui.msgVeganAnimal;
+      return APP_ERRORS.dietConflictVeganAnimal;
     case 'gluten_grain':
-      return ui.msgGluten;
+      return APP_ERRORS.dietConflictGluten;
     default:
-      return ui.msgVegetarian;
+      return APP_ERRORS.dietConflictVegetarian;
   }
 }
 
@@ -331,7 +362,7 @@ export default function CraftScreen() {
 
   const detectIngredientsFromBase64 = async (base64: string, mimeType: string) => {
     if (!API_BASE_URL) {
-      setErrorMessage('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
+      setErrorMessage(APP_ERRORS.apiBaseUrlMissing);
       return;
     }
 
@@ -372,11 +403,9 @@ export default function CraftScreen() {
       setIngredient(ingredients.slice(0, 12).join(', '));
     } catch (error: unknown) {
       if (isAbortError(error)) {
-        setErrorMessage('Image recognition timed out. Please try again.');
-      } else if (error instanceof Error) {
-        setErrorMessage(error.message);
+        setErrorMessage(APP_ERRORS.imageRecognitionTimeout);
       } else {
-        setErrorMessage('ছবি থেকে উপকরণ শনাক্ত করা যায়নি। আবার চেষ্টা করুন।');
+        setErrorMessage(userFacingError(error, APP_ERRORS.imageIngredientsFailed));
       }
     } finally {
       setRecognizingIngredients(false);
@@ -434,7 +463,7 @@ export default function CraftScreen() {
 
   const fetchRecipeNamesFromBackend = async (effectiveDiet: DietPreference) => {
     if (!API_BASE_URL) {
-      throw new Error('EXPO_PUBLIC_API_BASE_URL সেট করা নেই। .env ফাইলে API URL দিন।');
+      throw new Error(APP_ERRORS.apiBaseUrlMissing);
     }
 
     const maxCaloriesPerMeal = parseMaxCaloriesParam(maxCaloriesInput.trim());
@@ -548,15 +577,9 @@ export default function CraftScreen() {
         console.error(error);
       }
       if (isAbortError(error) || error?.message?.includes('408')) {
-        setErrorMessage(
-          resolvedLanguage === 'বাংলা'
-            ? 'সার্ভার উত্তর দিতে সময় লাগছে বা সংযোগ টাইম আউট হয়েছে। নেটওয়ার্ক দেখে আবার চেষ্টা করুন।'
-            : 'The server took too long or the connection timed out. Check your network and try again.'
-        );
-      } else if (error instanceof Error) {
-        setErrorMessage(error.message);
+        setErrorMessage(APP_ERRORS.connectionTimeout);
       } else {
-        setErrorMessage('রেসিপি লোড করা যায়নি। দয়া করে আবার চেষ্টা করুন।');
+        setErrorMessage(userFacingError(error, APP_ERRORS.recipeLoadFailed));
       }
     } finally {
       setLoading(false);
@@ -572,8 +595,8 @@ export default function CraftScreen() {
     const trimmed = normalizedIngredient;
     const conflict = analyzeDietInputConflict(dietPreference, trimmed);
     if (!conflict.ok) {
-      const dcUi = dietConflictUi[resolvedLanguage as keyof typeof dietConflictUi] ?? dietConflictUi.English;
-      Alert.alert(dcUi.title, dietConflictMessage(conflict.reason, dcUi), [
+      const dcUi = dietConflictUi.English;
+      Alert.alert(APP_ERRORS.dietConflictTitle, dietConflictMessageEn(conflict.reason), [
         { text: dcUi.btnCancel, style: 'cancel' },
         {
           text: dcUi.btnResetDiet,
@@ -738,10 +761,10 @@ export default function CraftScreen() {
             onPress={startVoiceInput}
             disabled={loading || recognizingIngredients}>
             <MaterialIcons name="mic" size={18} color="#d3b275" />
-            <Text style={styles.voiceButtonText}>Use keyboard mic</Text>
+            <Text style={styles.voiceButtonText}>{uiText.voiceButtonLabel}</Text>
           </TouchableOpacity>
           {showVoiceFallbackHint ? (
-            <Text style={styles.voiceHintText}>Keyboard খুলে mic আইকনে ট্যাপ করে কথা বলুন.</Text>
+            <Text style={styles.voiceHintText}>{uiText.voiceFallbackHint}</Text>
           ) : null}
           <View style={styles.scanRow}>
             <TouchableOpacity
