@@ -319,6 +319,8 @@ type CookModeUi = {
   heardPrefix: string;
   timerStarted: string;
   noStepTimeStatus: string;
+  /** Shown while countdown tick plays — mic is off so tick audio is not treated as a command. */
+  timerVoicePaused: string;
   voiceUnavailable: string;
   voiceOff: string;
   voiceListening: string;
@@ -369,6 +371,7 @@ const EN_UI: CookModeUi = {
   heardPrefix: 'Heard',
   timerStarted: 'Timer started',
   noStepTimeStatus: 'No step time found for timer',
+  timerVoicePaused: 'Timer running — voice paused. Use on-screen controls.',
   voiceUnavailable: 'Voice commands unavailable. Install the app from Google Play.',
   voiceOff: 'Voice command off',
   voiceListening: 'Listening for commands',
@@ -416,6 +419,7 @@ const COOK_UI_TEXT: Record<string, CookModeUi> = {
     heardPrefix: 'শুনলাম',
     timerStarted: 'টাইমার শুরু হয়েছে',
     noStepTimeStatus: 'এই ধাপে টাইমার সময় পাওয়া যায়নি',
+    timerVoicePaused: 'টাইমার চলছে — ভয়েস কমান্ড বন্ধ। স্ক্রিনের বাটন ব্যবহার করুন।',
     voiceUnavailable: 'Voice command unavailable here. Use dev build.',
     voiceOff: 'Voice command বন্ধ',
     voiceListening: 'কমান্ড শোনা হচ্ছে',
@@ -991,9 +995,11 @@ export default function CookModeScreen() {
   const ttsPartialAccumRef = React.useRef('');
   const lastPauseInterruptAtRef = React.useRef(0);
   const interruptStepReadingRef = React.useRef<(heard?: string) => void>(() => {});
+  const timerStatusRef = React.useRef(timerStatus);
 
   remainingSecondsRef.current = remainingSeconds;
   handsFreeEnabledRef.current = handsFreeEnabled;
+  timerStatusRef.current = timerStatus;
 
   const clearRecognitionRestartTimer = React.useCallback(() => {
     if (recognitionRestartTimerRef.current) {
@@ -1255,10 +1261,19 @@ export default function CookModeScreen() {
 
   const recognitionRestartDelayMs = Platform.OS === 'android' ? 800 : 400;
 
+  const pauseMicForActiveTimer = React.useCallback(() => {
+    clearRecognitionRestartTimer();
+    clearPartialCommandDebounce();
+    pendingPartialTranscriptRef.current = '';
+    ttsPartialAccumRef.current = '';
+    speechRecognitionModule?.stop();
+  }, [clearPartialCommandDebounce, clearRecognitionRestartTimer, speechRecognitionModule]);
+
   const scheduleRecognitionRestart = React.useCallback(
     (delayMs: number, statusWhileWaiting?: string) => {
       clearRecognitionRestartTimer();
       if (!handsFreeEnabledRef.current || !speechRecognitionModule) return;
+      if (timerStatusRef.current === 'running') return;
       if (statusWhileWaiting) setVoiceStatusText(statusWhileWaiting);
       recognitionRestartTimerRef.current = setTimeout(() => {
         recognitionRestartTimerRef.current = null;
@@ -1279,8 +1294,28 @@ export default function CookModeScreen() {
   const resumeMicAfterTts = React.useCallback(() => {
     pendingMicRestartAfterTtsRef.current = false;
     if (!handsFreeEnabledRef.current || !speechRecognitionModule) return;
+    if (timerStatusRef.current === 'running') return;
     scheduleRecognitionRestart(Platform.OS === 'android' ? 450 : 250);
   }, [scheduleRecognitionRestart, speechRecognitionModule]);
+
+  const resumeMicIfHandsFree = React.useCallback(() => {
+    if (!handsFreeEnabledRef.current || !speechRecognitionModule) return;
+    if (timerStatusRef.current === 'running' || isTtsSpeakingRef.current) return;
+    scheduleRecognitionRestart(Platform.OS === 'android' ? 450 : 250);
+  }, [scheduleRecognitionRestart, speechRecognitionModule]);
+
+  React.useEffect(() => {
+    if (timerStatus === 'running') {
+      pauseMicForActiveTimer();
+      if (handsFreeEnabledRef.current) {
+        setVoiceStatusText(ui.timerVoicePaused);
+      }
+      return;
+    }
+    if (handsFreeEnabledRef.current) {
+      resumeMicIfHandsFree();
+    }
+  }, [pauseMicForActiveTimer, resumeMicIfHandsFree, timerStatus, ui.timerVoicePaused]);
 
   const cancelStepTts = React.useCallback(() => {
     const wasSpeaking = isTtsSpeakingRef.current;
@@ -1415,7 +1450,11 @@ export default function CookModeScreen() {
       }
       isTtsSpeakingRef.current = false;
       setHandsFreeEnabled(true);
-      setVoiceStatusText(isTtsSpeakingRef.current ? ui.voiceReadingStep : ui.voiceListening);
+      if (timerStatusRef.current === 'running') {
+        setVoiceStatusText(ui.timerVoicePaused);
+        return true;
+      }
+      setVoiceStatusText(ui.voiceListening);
       mod.start(cookModeSpeechRecognitionOptions);
       return true;
     } catch {
@@ -1425,8 +1464,8 @@ export default function CookModeScreen() {
   }, [
     cookModeSpeechRecognitionOptions,
     speechRecognitionModule,
+    ui.timerVoicePaused,
     ui.voiceListening,
-    ui.voiceReadingStep,
   ]);
 
   const toggleHandsFreeListening = React.useCallback(() => {
@@ -1539,6 +1578,7 @@ export default function CookModeScreen() {
   const tryExecuteVoiceTranscript = React.useCallback(
     (transcript: string) => {
       if (!transcript) return;
+      if (timerStatusRef.current === 'running') return;
       const now = Date.now();
       const command = resolveVoiceCommandFromTranscript(transcript, resolvedVoiceLanguage);
 
@@ -1570,6 +1610,7 @@ export default function CookModeScreen() {
     if (!speechRecognitionModule?.addListener) return;
 
     const onResult = speechRecognitionModule.addListener('result', (event: SpeechRecognitionResultEvent) => {
+      if (timerStatusRef.current === 'running') return;
       const transcript = event.results?.[0]?.transcript?.trim();
       const isPartial = speechResultIsPartial(event);
 
@@ -1620,17 +1661,18 @@ export default function CookModeScreen() {
     });
 
     const onError = speechRecognitionModule.addListener('error', () => {
-      if (isTtsSpeakingRef.current) return;
+      if (isTtsSpeakingRef.current || timerStatusRef.current === 'running') return;
       scheduleRecognitionRestart(900, ui.voiceReconnect);
     });
 
     const onStart = speechRecognitionModule.addListener('start', () => {
-      if (isTtsSpeakingRef.current) return;
+      if (isTtsSpeakingRef.current || timerStatusRef.current === 'running') return;
       setVoiceStatusText(ui.voiceListening);
     });
 
     const onEnd = speechRecognitionModule.addListener('end', () => {
       if (!handsFreeEnabledRef.current) return;
+      if (timerStatusRef.current === 'running') return;
       if (isTtsSpeakingRef.current) {
         pendingMicRestartAfterTtsRef.current = true;
         return;

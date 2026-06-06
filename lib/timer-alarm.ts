@@ -18,7 +18,11 @@ export async function startTickingSound(): Promise<void> {
   if (Platform.OS === 'web') return;
   try {
     await stopTickingSound();
-    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
     const { sound } = await Audio.Sound.createAsync(TICK_MODULE, {
       shouldPlay: true,
       isLooping: true,
