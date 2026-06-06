@@ -329,7 +329,10 @@ export default function RecipeDetailsScreen() {
         );
         return;
       }
-      const perm = await requestPermissionsAsync();
+      const perm =
+        Platform.OS === 'android'
+          ? await requestPermissionsAsync(true)
+          : await requestPermissionsAsync();
       if (!perm.granted) {
         Alert.alert('Permission needed', 'Allow photo library access to save this image.');
         return;

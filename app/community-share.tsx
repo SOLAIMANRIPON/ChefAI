@@ -7,6 +7,7 @@ import React from 'react';
 import {
   Alert,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,10 +29,12 @@ export default function CommunityShareScreen() {
   const [saving, setSaving] = React.useState(false);
 
   const pickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(t('community.alertPermissionTitle'), t('community.alertPermissionBody'));
-      return;
+    if (Platform.OS === 'ios') {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(t('community.alertPermissionTitle'), t('community.alertPermissionBody'));
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],

@@ -20,13 +20,20 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.solaiman.chefai"
+      "package": "com.solaiman.chefai",
+      "playStoreUrl": "https://play.google.com/store/apps/details?id=com.solaiman.chefai",
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
+      ]
     },
     "plugins": [
       [
         "expo-image-picker",
         {
-          "photosPermission": "ChefAI needs photo access so you can share your cooking in Community."
+          "photosPermission": "ChefAI needs photo access so you can share your cooking in Community.",
+          "microphonePermission": false
         }
       ],
       [
@@ -34,7 +41,7 @@
         {
           "photosPermission": "ChefAI can save dish photos you choose to export to your gallery.",
           "savePhotosPermission": "ChefAI saves dish photos to your gallery when you tap Save photo to gallery.",
-          "isAccessMediaLocationEnabled": true
+          "granularPermissions": []
         }
       ],
       "expo-localization",

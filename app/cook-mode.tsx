@@ -7,6 +7,7 @@ import {
   scheduleCookTimerNotification,
 } from '@/lib/cook-timer-notifications';
 import { extractMinutesFromStep, parseRecipeSteps } from '@/lib/recipe-steps';
+import { recordCookModeCompletedAndMaybeRequestReview } from '@/lib/in-app-review';
 import { playTimerDoneSound, startTickingSound, stopTickingSound } from '@/lib/timer-alarm';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Constants from 'expo-constants';
@@ -975,6 +976,8 @@ export default function CookModeScreen() {
   const lastVoiceTranscriptRef = React.useRef('');
   const lastVoiceCommandAtRef = React.useRef(0);
   const isTtsSpeakingRef = React.useRef(false);
+  /** One Cook Mode finish → one review eligibility tick per screen visit. */
+  const cookCompletionRecordedRef = React.useRef(false);
   const pendingMicRestartAfterTtsRef = React.useRef(false);
   const handsFreeEnabledRef = React.useRef(false);
   const recognitionRestartTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1215,10 +1218,20 @@ export default function CookModeScreen() {
     router.back();
   };
 
+  const notifyCookModeFinished = React.useCallback(() => {
+    if (cookCompletionRecordedRef.current) return;
+    cookCompletionRecordedRef.current = true;
+    void recordCookModeCompletedAndMaybeRequestReview();
+  }, []);
+
   const toggleDoneAt = (index: number) => {
     setDone((prev) => {
       const next = [...prev];
+      const wasDone = next[index];
       next[index] = !next[index];
+      if (!wasDone && next[index] && index === stepCount - 1) {
+        notifyCookModeFinished();
+      }
       return next;
     });
   };
@@ -1229,8 +1242,12 @@ export default function CookModeScreen() {
       next[safeIndex] = true;
       return next;
     });
-    if (safeIndex < stepCount - 1) setCurrentIndex(safeIndex + 1);
-  }, [safeIndex, stepCount]);
+    if (safeIndex < stepCount - 1) {
+      setCurrentIndex(safeIndex + 1);
+    } else {
+      notifyCookModeFinished();
+    }
+  }, [notifyCookModeFinished, safeIndex, stepCount]);
 
   const scrollBottomPad =
     20 + HOME_EXPLORE_NAV_RESERVED_BOTTOM + (timerStripVisible ? TIMER_STICKY_MIN_HEIGHT + 8 : 0) + PADDING_BOTTOM_EXTRA;
