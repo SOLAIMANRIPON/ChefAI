@@ -1,6 +1,7 @@
 import { DesignerCreditLine } from '@/components/designer-footer';
 import { HomeExploreNav, HOME_EXPLORE_NAV_RESERVED_BOTTOM } from '@/components/home-explore-nav';
 import { APP_ERRORS, userFacingError } from '@/constants/app-errors';
+import { logCreditsPurchased, logRecipeGenerated, logRecipeSaved } from '@/lib/firebase-analytics';
 import { DEFAULT_CUISINE, DEFAULT_UI_LANGUAGE } from '@/constants/app-defaults';
 import { getSaveRecipeAlerts } from '@/constants/save-recipe-alerts';
 import { appendPlayStoreFooterToRecipeShare } from '@/constants/share-recipe-footer';
@@ -406,6 +407,7 @@ export default function RecipeDetailsScreen() {
         savedAt: new Date().toISOString(),
       };
       await upsertSavedRecipe(nextItem);
+      logRecipeSaved({ language: selectedLang, cuisine: selectedCuisine });
       const usedDataImage = rawImage.startsWith('data:') && !imageToStore;
       Alert.alert(
         alerts.savedTitle,
@@ -580,6 +582,11 @@ export default function RecipeDetailsScreen() {
           nutrition: nutritionEstimate,
           structured: backendStructured,
         };
+        logRecipeGenerated({
+          language: selectedLang,
+          cuisine: selectedCuisine,
+          withImage: includeImage,
+        });
       } catch (error) {
         console.error(error);
         setErrorMessage(userFacingError(error, APP_ERRORS.recipeLoadFailed));
@@ -701,6 +708,9 @@ export default function RecipeDetailsScreen() {
           productSku,
         });
         setBilling(next);
+        const packCredits =
+          getPlayCreditPacks().find((p) => p.productId === productSku)?.credits ?? 0;
+        logCreditsPurchased({ productId: productSku, credits: packCredits });
         Alert.alert('Buy credits', `Your balance is now ${next.credits} credits.`, [{ text: 'OK' }]);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Purchase did not complete.';

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "604324545086",
+    "project_id": "chefai-4cb13",
+    "storage_bucket": "chefai-4cb13.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:604324545086:android:adc166f8f4785dfefa476f",
+        "android_client_info": {
+          "package_name": "com.solaiman.chefai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZYq1-uk8Cgs_1F_kEy4ZxHjnX4aCMsZ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

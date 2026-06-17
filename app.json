@@ -22,6 +22,7 @@
       },
       "package": "com.solaiman.chefai",
       "playStoreUrl": "https://play.google.com/store/apps/details?id=com.solaiman.chefai",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ],
@@ -60,6 +61,15 @@
         {
           "microphonePermission": "ChefAI needs microphone access for Cook Mode voice commands.",
           "speechRecognitionPermission": "ChefAI uses speech recognition so you can control Cook Mode hands-free."
+        }
+      ],
+      "@react-native-firebase/app",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
         }
       ],
       "react-native-iap"
